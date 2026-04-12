@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Virtual environments
+venv/
+.venv/
+
+# Backend runtime artifacts
+backend/app.db
+backend/uploads/
+backend/exports/
+runtime/
+
+# Benchmark outputs
+backend/benchmarks/*.csv
+backend/benchmarks/*.json
+
+# Frontend (future)
+node_modules/
+dist/
+frontend/dist/
+
+# Dev scripts
+.dev-pids
+
+# OS
+.DS_Store
+
+# Temporary transfer/cache folders
+.tmp.drivedownload/
+.tmp.driveupload/

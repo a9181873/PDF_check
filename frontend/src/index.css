@@ -1,0 +1,144 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --color-diff-added: 0 153 68;     /* #009944 - CTBC Green */
+    --color-diff-deleted: 230 0 18;   /* #E60012 - CTBC Red */
+    --color-diff-modified: 255 152 0; /* #ff9800 - Orange */
+    --color-diff-text: 103 58 183;    /* #673ab7 - Purple */
+    --color-diff-highlight: 255 235 59; /* #ffeb3b - Yellow */
+    color: #1f2937;
+    background-color: #f5f5f5;
+  }
+
+  body {
+    @apply antialiased text-gray-900;
+    font-feature-settings: "rlig" 1, "calt" 1;
+    background:
+      radial-gradient(circle at top, rgba(0, 153, 68, 0.08), transparent 34%),
+      linear-gradient(180deg, #f5f5f5 0%, #edf3ee 100%);
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    @apply w-2 h-2;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-gray-100 rounded;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-gray-400 rounded hover:bg-gray-500 transition-colors;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply px-4 py-2 rounded-lg font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-primary {
+    @apply btn bg-primary-600 text-white hover:bg-primary-700 focus:ring-primary-500;
+  }
+
+  .btn-secondary {
+    @apply btn bg-gray-200 text-gray-800 hover:bg-gray-300 focus:ring-gray-400;
+  }
+
+  .btn-outline {
+    @apply btn border border-gray-300 text-gray-700 hover:bg-gray-50 focus:ring-gray-400;
+  }
+
+  .btn-success {
+    @apply btn bg-diff-added text-white hover:bg-emerald-600 focus:ring-emerald-500;
+  }
+
+  .btn-danger {
+    @apply btn bg-diff-deleted text-white hover:bg-red-600 focus:ring-red-500;
+  }
+
+  .btn-warning {
+    @apply btn bg-diff-modified text-white hover:bg-orange-600 focus:ring-orange-500;
+  }
+
+  .card {
+    @apply bg-white rounded-xl shadow-soft border border-gray-200 p-6;
+  }
+
+  .input {
+    @apply w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all;
+  }
+
+  .badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .badge-added {
+    @apply badge bg-emerald-100 text-emerald-800;
+  }
+
+  .badge-deleted {
+    @apply badge bg-red-100 text-red-800;
+  }
+
+  .badge-modified {
+    @apply badge bg-orange-100 text-orange-800;
+  }
+
+  .badge-text {
+    @apply badge bg-purple-100 text-purple-800;
+  }
+
+  .badge-confirmed {
+    @apply badge bg-emerald-100 text-emerald-800;
+  }
+
+  .badge-flagged {
+    @apply badge bg-red-100 text-red-800;
+  }
+
+  .badge-pending {
+    @apply badge bg-amber-100 text-amber-800;
+  }
+
+  .badge-missing {
+    @apply badge bg-gray-100 text-gray-800;
+  }
+}
+
+@layer utilities {
+  .filter-grayscale {
+    filter: grayscale(100%);
+  }
+
+  .scroll-sync {
+    scroll-behavior: smooth;
+  }
+
+  .pdf-page {
+    @apply shadow-medium rounded overflow-hidden bg-white;
+  }
+
+  .diff-overlay {
+    @apply absolute border-2 pointer-events-auto opacity-70 hover:opacity-100 transition-opacity;
+  }
+
+  .diff-overlay-added {
+    @apply diff-overlay border-diff-added bg-diff-added/10;
+  }
+
+  .diff-overlay-deleted {
+    @apply diff-overlay border-diff-deleted bg-diff-deleted/10;
+  }
+
+  .diff-overlay-modified {
+    @apply diff-overlay border-diff-modified bg-diff-modified/10;
+  }
+
+  .diff-overlay-text {
+    @apply diff-overlay border-diff-text bg-diff-text/10;
+  }
+}

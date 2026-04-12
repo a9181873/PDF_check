@@ -1,0 +1,38 @@
+@echo off
+setlocal
+
+cd /d "%~dp0"
+
+echo ====================================
+echo   PDF 比對系統 - 一鍵停止
+echo ====================================
+
+where docker >nul 2>&1
+if errorlevel 1 (
+  echo 找不到 Docker。
+  echo.
+  pause
+  exit /b 1
+)
+
+docker info >nul 2>&1
+if errorlevel 1 (
+  echo Docker 尚未啟動，無法執行停止。
+  echo.
+  pause
+  exit /b 1
+)
+
+docker compose down
+if errorlevel 1 (
+  echo.
+  echo 停止失敗，請檢查上方訊息。
+  echo.
+  pause
+  exit /b 1
+)
+
+echo.
+echo 已停止服務。
+echo.
+pause
