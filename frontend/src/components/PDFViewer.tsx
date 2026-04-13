@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
 // import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
 // import 'react-pdf/dist/esm/Page/TextLayer.css';
@@ -24,93 +24,98 @@ interface PDFViewerProps {
   showControls?: boolean;
 }
 
-interface PDFDocumentPaneProps {
+/**
+ * Renders ALL pages of a PDF in a vertical stack for continuous scrolling.
+ * Uses IntersectionObserver to detect which page is currently most visible.
+ */
+const PDFAllPages: React.FC<{
   file: string | File;
-  currentPage: number;
+  numPages: number;
   grayscale: boolean;
   scale: number;
   rotation: number;
+  onVisiblePageChange: (page: number) => void;
   children?: React.ReactNode;
-  onDocumentLoadSuccess: (payload: { numPages: number }) => void;
-  onDocumentLoadError: (error: Error) => void;
-}
+}> = ({ file, numPages, grayscale, scale, rotation, onVisiblePageChange, children }) => {
+  const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  const containerRef = useRef<HTMLDivElement>(null);
 
-const PDFDocumentPane: React.FC<PDFDocumentPaneProps> = ({
-  file,
-  currentPage,
-  grayscale,
-  scale,
-  rotation,
-  children,
-  onDocumentLoadSuccess,
-  onDocumentLoadError,
-}) => {
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // Use IntersectionObserver to detect the most visible page
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        let maxRatio = 0;
+        let maxPage = 1;
+        entries.forEach((entry) => {
+          const pageNum = Number(entry.target.getAttribute('data-page'));
+          if (entry.intersectionRatio > maxRatio) {
+            maxRatio = entry.intersectionRatio;
+            maxPage = pageNum;
+          }
+        });
+        if (maxRatio > 0) {
+          onVisiblePageChange(maxPage);
+        }
+      },
+      {
+        root: null,
+        threshold: [0, 0.25, 0.5, 0.75, 1.0],
+      }
+    );
 
-  const handleLoadSuccess = (payload: { numPages: number }) => {
-    setIsLoading(false);
-    setError(null);
-    onDocumentLoadSuccess(payload);
-  };
+    pageRefs.current.forEach((el) => observer.observe(el));
 
-  const handleLoadError = (loadError: Error) => {
-    console.error('PDF load error:', loadError);
-    setIsLoading(false);
-    setError(`無法載入 PDF: ${loadError.message}`);
-    onDocumentLoadError(loadError);
-  };
+    return () => observer.disconnect();
+  }, [numPages, onVisiblePageChange]);
+
+  const setPageRef = useCallback((pageNum: number, el: HTMLDivElement | null) => {
+    if (el) {
+      pageRefs.current.set(pageNum, el);
+    } else {
+      pageRefs.current.delete(pageNum);
+    }
+  }, []);
+
+  const pages = Array.from({ length: numPages }, (_, i) => i + 1);
 
   return (
-    <>
-      {isLoading && (
-        <div className="absolute inset-0 flex items-center justify-center">
-          <div className="text-center">
-            <Loader2 className="w-8 h-8 animate-spin text-primary-600 mx-auto mb-3" />
-            <p className="text-gray-600">載入 PDF 中...</p>
+    <div ref={containerRef} className={`${grayscale ? 'filter-grayscale' : ''}`}>
+      <Document
+        file={file}
+        loading={
+          <div className="flex items-center justify-center h-64">
+            <Loader2 className="w-6 h-6 animate-spin text-primary-600" />
           </div>
-        </div>
-      )}
+        }
+      >
+        {pages.map((pageNum) => (
+          <div
+            key={pageNum}
+            ref={(el) => setPageRef(pageNum, el)}
+            data-page={pageNum}
+            className="flex justify-center py-2 relative"
+          >
+            <Page
+              pageNumber={pageNum}
+              scale={scale}
+              rotate={rotation}
+              renderTextLayer
+              renderAnnotationLayer
+              className="pdf-page shadow-md"
+            />
+            {/* Page number badge */}
+            <div className="absolute top-3 right-3 bg-black/50 text-white text-xs px-2 py-0.5 rounded-full z-10">
+              {pageNum} / {numPages}
+            </div>
+          </div>
+        ))}
+      </Document>
 
-      {error && (
-        <div className="absolute inset-0 flex items-center justify-center">
-          <div className="text-center p-6 bg-red-50 rounded-lg max-w-md">
-            <p className="text-red-700 font-medium mb-2">載入失敗</p>
-            <p className="text-red-600 text-sm">{error}</p>
-          </div>
-        </div>
-      )}
-
-      {!error ? (
-        <>
-          <div className={`flex justify-center p-4 ${grayscale ? 'filter-grayscale' : ''}`}>
-            <Document
-              file={file}
-              onLoadSuccess={handleLoadSuccess}
-              onLoadError={handleLoadError}
-              loading={
-                <div className="flex items-center justify-center h-64">
-                  <Loader2 className="w-6 h-6 animate-spin text-primary-600" />
-                </div>
-              }
-            >
-              <Page
-                pageNumber={currentPage}
-                scale={scale}
-                rotate={rotation}
-                renderTextLayer
-                renderAnnotationLayer
-                className="pdf-page"
-              />
-            </Document>
-          </div>
-
-          <div className="absolute inset-0 pointer-events-none [&>*]:pointer-events-auto">
-            {children}
-          </div>
-        </>
-      ) : null}
-    </>
+      {/* Diff overlay sits on top of the whole stack */}
+      <div className="absolute inset-0 pointer-events-none [&>*]:pointer-events-auto">
+        {children}
+      </div>
+    </div>
   );
 };
 
@@ -129,14 +134,18 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   showControls = true,
 }) => {
   const [numPages, setNumPages] = useState<number | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const handleDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
-    setNumPages(numPages);
+  const handleDocumentLoadSuccess = ({ numPages: n }: { numPages: number }) => {
+    setNumPages(n);
+    setIsLoading(false);
     setError(null);
   };
 
   const handleDocumentLoadError = (loadError: Error) => {
+    console.error('PDF load error:', loadError);
+    setIsLoading(false);
     setError(`無法載入 PDF: ${loadError.message}`);
   };
 
@@ -173,6 +182,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       onPageChange?.(page);
     }
   };
+
+  const handleVisiblePageChange = useCallback(
+    (page: number) => {
+      onPageChange?.(page);
+    },
+    [onPageChange]
+  );
 
   const documentKey =
     typeof file === 'string'
@@ -265,18 +281,63 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
 
       <div className="relative flex-1 bg-gray-200 rounded-b-lg overflow-auto">
         {file ? (
-          <PDFDocumentPane
-            key={documentKey}
-            file={file}
-            currentPage={currentPage}
-            grayscale={grayscale}
-            scale={scale}
-            rotation={rotation}
-            onDocumentLoadSuccess={handleDocumentLoadSuccess}
-            onDocumentLoadError={handleDocumentLoadError}
-          >
-            {children}
-          </PDFDocumentPane>
+          <>
+            {isLoading && (
+              <div className="absolute inset-0 flex items-center justify-center z-10">
+                <div className="text-center">
+                  <Loader2 className="w-8 h-8 animate-spin text-primary-600 mx-auto mb-3" />
+                  <p className="text-gray-600">載入 PDF 中...</p>
+                </div>
+              </div>
+            )}
+
+            {error && (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="text-center p-6 bg-red-50 rounded-lg max-w-md">
+                  <p className="text-red-700 font-medium mb-2">載入失敗</p>
+                  <p className="text-red-600 text-sm">{error}</p>
+                </div>
+              </div>
+            )}
+
+            {!error && (
+              <Document
+                key={documentKey}
+                file={file}
+                onLoadSuccess={handleDocumentLoadSuccess}
+                onLoadError={handleDocumentLoadError}
+                loading={null}
+              >
+                <div className={`${grayscale ? 'filter-grayscale' : ''}`}>
+                  {numPages && Array.from({ length: numPages }, (_, i) => i + 1).map((pageNum) => (
+                    <div
+                      key={pageNum}
+                      data-page={pageNum}
+                      className="flex justify-center py-2 relative"
+                    >
+                      <Page
+                        pageNumber={pageNum}
+                        scale={scale}
+                        rotate={rotation}
+                        renderTextLayer
+                        renderAnnotationLayer
+                        className="pdf-page shadow-md"
+                      />
+                      {/* Page number badge */}
+                      <div className="absolute top-3 right-3 bg-black/50 text-white text-xs px-2 py-0.5 rounded-full z-10">
+                        {pageNum} / {numPages}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Diff overlay sits on top of the whole stack */}
+                <div className="absolute inset-0 pointer-events-none [&>*]:pointer-events-auto">
+                  {children}
+                </div>
+              </Document>
+            )}
+          </>
         ) : !error ? (
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="text-center p-8">
