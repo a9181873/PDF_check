@@ -65,6 +65,7 @@ const ComparePage: React.FC = () => {
     leftPanelHidden,
     currentPage,
     scrollSyncEnabled,
+    grayscaleEnabled,
     diffPopupOpen,
     selectedDiffForPopup,
     setTaskId,
@@ -78,6 +79,7 @@ const ComparePage: React.FC = () => {
     toggleLeftPanel,
     setCurrentPage,
     setScrollSyncEnabled,
+    setGrayscaleEnabled,
     openDiffPopup,
     closeDiffPopup,
     confirmDiff: storeConfirmDiff,
@@ -650,7 +652,8 @@ const ComparePage: React.FC = () => {
                         currentPage={currentPage.old}
                         onPageChange={(page) => handlePageChange('old', page)}
                         scale={1.0}
-                        grayscale
+                        grayscale={grayscaleEnabled}
+                        onGrayscaleChange={setGrayscaleEnabled}
                         showControls={false}
                         diffItems={filteredItems}
                         selectedDiffId={selectedDiffId}
@@ -663,7 +666,8 @@ const ComparePage: React.FC = () => {
                         currentPage={currentPage.new}
                         onPageChange={(page) => handlePageChange('new', page)}
                         scale={1.0}
-                        grayscale
+                        grayscale={grayscaleEnabled}
+                        onGrayscaleChange={setGrayscaleEnabled}
                         showControls={false}
                         diffItems={filteredItems}
                         selectedDiffId={selectedDiffId}

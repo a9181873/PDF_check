@@ -28,6 +28,7 @@ interface CompareState {
   leftPanelHidden: boolean;
   currentPage: { old: number; new: number };
   scrollSyncEnabled: boolean;
+  grayscaleEnabled: boolean;
   diffPopupOpen: boolean;
   selectedDiffForPopup: DiffItem | null;
   
@@ -45,6 +46,7 @@ interface CompareState {
   setCurrentPage: (side: 'old' | 'new', page: number) => void;
   syncPages: (page: number) => void;
   setScrollSyncEnabled: (enabled: boolean) => void;
+  setGrayscaleEnabled: (enabled: boolean) => void;
   openDiffPopup: (diff: DiffItem) => void;
   closeDiffPopup: () => void;
   confirmDiff: (diffId: string, reviewer?: string, note?: string) => Promise<void>;
@@ -78,6 +80,7 @@ export const useCompareStore = create<CompareState>()(
       leftPanelHidden: false,
       currentPage: { old: 1, new: 1 },
       scrollSyncEnabled: true,
+      grayscaleEnabled: true,
       diffPopupOpen: false,
       selectedDiffForPopup: null,
 
@@ -169,6 +172,8 @@ export const useCompareStore = create<CompareState>()(
       },
 
       setScrollSyncEnabled: (enabled) => set({ scrollSyncEnabled: enabled }),
+
+      setGrayscaleEnabled: (enabled) => set({ grayscaleEnabled: enabled }),
 
       openDiffPopup: (diff) => set({ diffPopupOpen: true, selectedDiffForPopup: diff }),
 

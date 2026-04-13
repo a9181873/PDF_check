@@ -260,27 +260,37 @@ def diff_tables(old_tables: list[ParsedTable], new_tables: list[ParsedTable]) ->
                         old_sub = old_cell[c_i1:c_i2] if c_i1 < c_i2 else None
                         new_sub = new_cell[c_j1:c_j2] if c_j1 < c_j2 else None
                         
+                        # Use 0-based indexing to find cell bboxes
+                        o_cell_bbox = old_table.cell_bboxes.get((row_index - 1, col_index - 1))
+                        n_cell_bbox = new_table.cell_bboxes.get((row_index - 1, col_index - 1))
+
+                        old_sub_bbox = refine_bbox_for_text(old_cell, o_cell_bbox, c_i1, c_i2) if o_cell_bbox and old_sub else None
+                        new_sub_bbox = refine_bbox_for_text(new_cell, n_cell_bbox, c_j1, c_j2) if n_cell_bbox and new_sub else None
+
                         diff_items.append(
                             DiffItem(
                                 id="",
                                 diff_type=_guess_diff_type(old_sub, new_sub),
                                 old_value=old_sub,
                                 new_value=new_sub,
-                                old_bbox=None,
-                                new_bbox=None,
+                                old_bbox=old_sub_bbox,
+                                new_bbox=new_sub_bbox,
                                 context=f"{context} / row {row_index} col {col_index}",
                                 confidence=0.72,
                             )
                         )
                 else:
+                    o_cell_bbox = old_table.cell_bboxes.get((row_index - 1, col_index - 1))
+                    n_cell_bbox = new_table.cell_bboxes.get((row_index - 1, col_index - 1))
+
                     diff_items.append(
                         DiffItem(
                             id="",
                             diff_type=_guess_diff_type(old_cell or None, new_cell or None),
                             old_value=old_cell or None,
                             new_value=new_cell or None,
-                            old_bbox=None,
-                            new_bbox=None,
+                            old_bbox=o_cell_bbox,
+                            new_bbox=n_cell_bbox,
                             context=f"{context} / row {row_index} col {col_index}",
                             confidence=0.72,
                         )
