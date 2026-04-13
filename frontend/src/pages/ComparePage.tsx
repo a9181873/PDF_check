@@ -5,7 +5,6 @@ import { AlertCircle, BarChart3, ChevronDown, Download, Eye, EyeOff, Upload } fr
 
 import ChecklistPanel from '../components/ChecklistPanel';
 import DiffListPanel from '../components/DiffListPanel';
-import DiffOverlay from '../components/DiffOverlay';
 import SearchBar from '../components/SearchBar';
 import SyncScrollContainer from '../components/SyncScrollContainer';
 import { checklistApi, buildApiUrl, buildWebSocketUrl, compareApi, reviewApi } from '../services/api';
@@ -101,6 +100,7 @@ const ComparePage: React.FC = () => {
   };
 
   const handleDiffClick = (diff: any) => {
+    setSelectedDiffId(diff.id);
     openDiffPopup(diff);
     broadcastDiffSelect(diff.id);
   };
@@ -653,6 +653,7 @@ const ComparePage: React.FC = () => {
                         grayscale
                         showControls={false}
                         diffItems={filteredItems}
+                        selectedDiffId={selectedDiffId}
                         onDiffClick={handleDiffClick}
                       />
                     }
@@ -665,6 +666,7 @@ const ComparePage: React.FC = () => {
                         grayscale
                         showControls={false}
                         diffItems={filteredItems}
+                        selectedDiffId={selectedDiffId}
                         onDiffClick={handleDiffClick}
                       />
                     }

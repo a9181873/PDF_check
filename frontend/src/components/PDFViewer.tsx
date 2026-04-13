@@ -72,10 +72,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   };
 
   /**
-   * When react-pdf finishes rendering a page, capture its actual dimensions
-   * so DiffOverlay can use correct coordinate scaling.
-   */
-  /**
    * react-pdf Page onLoadSuccess gives us the page proxy with
    * originalWidth / originalHeight (PDF points) and width / height (rendered px).
    * This is the most precise way to get coordinate mapping.
