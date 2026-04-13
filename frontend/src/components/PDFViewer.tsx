@@ -249,7 +249,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 onLoadError={handleDocumentLoadError}
                 loading={null}
               >
-                <div className={`${grayscale ? 'filter-grayscale' : ''}`}>
+                <div>
                   {numPages && Array.from({ length: numPages }, (_, i) => i + 1).map((pageNum) => {
                     const dims = pageDimensions.get(pageNum);
                     return (
@@ -267,7 +267,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                             rotate={rotation}
                             renderTextLayer={false}
                             renderAnnotationLayer={false}
-                            className="pdf-page shadow-md"
+                            className={`pdf-page shadow-md ${grayscale ? 'filter-grayscale' : ''}`}
                             onLoadSuccess={(page) => handlePageLoadSuccess(pageNum, page)}
                           />
                           {/* Per-page diff overlay */}

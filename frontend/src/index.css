@@ -127,17 +127,13 @@
     pointer-events: auto;
     transition: all 0.2s ease-in-out;
     border: 2px solid transparent;
-    opacity: 0.4;
-    mix-blend-mode: multiply;
   }
 
   .diff-overlay:hover, .diff-overlay.is-selected {
-    opacity: 1 !important;
     z-index: 20;
-    mix-blend-mode: normal;
     border-style: solid;
     border-width: 2px;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   }
 
   .diff-overlay.is-selected {
@@ -148,34 +144,34 @@
 
   /* Color mapping from Tailwind config */
   .diff-overlay-added {
-    background-color: #009944;
+    background-color: rgba(52, 211, 153, 0.35); /* emerald-400 */
   }
   .diff-overlay-added:hover, .diff-overlay-added.is-selected {
-    border-color: #009944;
-    background-color: rgba(0, 153, 68, 0.2);
+    border-color: #059669; /* emerald-600 */
+    background-color: rgba(52, 211, 153, 0.55);
   }
 
   .diff-overlay-deleted {
-    background-color: #E60012;
+    background-color: rgba(248, 113, 113, 0.35); /* red-400 */
   }
   .diff-overlay-deleted:hover, .diff-overlay-deleted.is-selected {
-    border-color: #E60012;
-    background-color: rgba(230, 0, 18, 0.2);
+    border-color: #dc2626; /* red-600 */
+    background-color: rgba(248, 113, 113, 0.55);
   }
 
   .diff-overlay-modified {
-    background-color: #ff9800;
+    background-color: rgba(250, 204, 21, 0.35); /* yellow-400 */
   }
   .diff-overlay-modified:hover, .diff-overlay-modified.is-selected {
-    border-color: #ff9800;
-    background-color: rgba(255, 152, 0, 0.2);
+    border-color: #ca8a04; /* yellow-600 */
+    background-color: rgba(250, 204, 21, 0.55);
   }
 
   .diff-overlay-text {
-    background-color: #673ab7;
+    background-color: rgba(167, 139, 250, 0.35); /* violet-400 */
   }
   .diff-overlay-text:hover, .diff-overlay-text.is-selected {
-    border-color: #673ab7;
-    background-color: rgba(103, 58, 183, 0.2);
+    border-color: #7c3aed; /* violet-600 */
+    background-color: rgba(167, 139, 250, 0.55);
   }
 }

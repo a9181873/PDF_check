@@ -11,6 +11,25 @@ NUMBER_PATTERN = re.compile(r"\d+(?:\.\d+)?%?")
 def _normalize(text: str) -> str:
     return " ".join(text.split())
 
+def refine_bbox_for_text(full_text: str, full_bbox, start_idx: int, end_idx: int):
+    if not full_text or end_idx <= start_idx or not full_bbox:
+        return full_bbox
+    height = full_bbox.y1 - full_bbox.y0
+    if height > 25:
+        # Multiline, interpolation will be stretched
+        return full_bbox
+    length = len(full_text)
+    frac_start = start_idx / length
+    frac_end = end_idx / length
+    width = full_bbox.x1 - full_bbox.x0
+    from models.diff_models import BBox
+    return BBox(
+        page=full_bbox.page,
+        x0=full_bbox.x0 + width * frac_start,
+        y0=full_bbox.y0,
+        x1=full_bbox.x0 + width * frac_end,
+        y1=full_bbox.y1
+    )
 
 def _contains_number(text: str | None) -> bool:
     if not text:
@@ -50,21 +69,33 @@ def diff_paragraphs(
             for offset in range(paired_count):
                 old_item = old_slice[offset]
                 new_item = new_slice[offset]
-                confidence = SequenceMatcher(
-                    a=_normalize(old_item.text), b=_normalize(new_item.text)
-                ).ratio()
-                diff_items.append(
-                    DiffItem(
-                        id="",
-                        diff_type=_guess_diff_type(old_item.text, new_item.text),
-                        old_value=old_item.text,
-                        new_value=new_item.text,
-                        old_bbox=old_item.bbox,
-                        new_bbox=new_item.bbox,
-                        context=f"Page {new_item.bbox.page}",
-                        confidence=confidence,
+                char_matcher = SequenceMatcher(a=old_item.text, b=new_item.text)
+                for c_tag, c_i1, c_i2, c_j1, c_j2 in char_matcher.get_opcodes():
+                    if c_tag == "equal":
+                        continue
+                    
+                    old_sub = old_item.text[c_i1:c_i2] if c_i1 < c_i2 else None
+                    new_sub = new_item.text[c_j1:c_j2] if c_j1 < c_j2 else None
+                    
+                    old_sub_bbox = refine_bbox_for_text(old_item.text, old_item.bbox, c_i1, c_i2) if old_item.bbox and old_sub else None
+                    new_sub_bbox = refine_bbox_for_text(new_item.text, new_item.bbox, c_j1, c_j2) if new_item.bbox and new_sub else None
+
+                    confidence = SequenceMatcher(
+                        a=_normalize(old_item.text), b=_normalize(new_item.text)
+                    ).ratio()
+
+                    diff_items.append(
+                        DiffItem(
+                            id="",
+                            diff_type=_guess_diff_type(old_sub, new_sub),
+                            old_value=old_sub,
+                            new_value=new_sub,
+                            old_bbox=old_sub_bbox,
+                            new_bbox=new_sub_bbox,
+                            context=f"Page {new_item.bbox.page if hasattr(new_item, 'bbox') and new_item.bbox else 'N/A'}",
+                            confidence=confidence,
+                        )
                     )
-                )
 
             for old_extra in old_slice[paired_count:]:
                 diff_items.append(

@@ -128,9 +128,16 @@ async def upload_compare_files(
     _assert_pdf(old_pdf)
     _assert_pdf(new_pdf)
 
-    resolved_project_id = project_id.strip() if project_id else ensure_default_project()
-    if project_id and not project_exists(resolved_project_id):
-        raise HTTPException(status_code=404, detail="Project not found")
+    if project_id:
+        stripped_id = project_id.strip()
+        if project_exists(stripped_id):
+            resolved_project_id = stripped_id
+        else:
+            from models.database import create_project
+            new_proj = create_project(stripped_id)
+            resolved_project_id = new_proj["id"]
+    else:
+        resolved_project_id = ensure_default_project()
 
     task_id = str(uuid.uuid4())
     TASK_STORE.create(task_id)

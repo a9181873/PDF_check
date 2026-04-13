@@ -46,6 +46,20 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from fastapi.responses import FileResponse, JSONResponse
+
+@app.exception_handler(StarletteHTTPException)
+async def spa_exception_handler(request, exc):
+    if exc.status_code == 404:
+        # If request is not an API call and has no file extension, return index.html for React Router
+        path = request.url.path
+        if not path.startswith("/api/") and not path.startswith("/ws/") and "." not in path.split("/")[-1]:
+            index_file = static_dir / "index.html"
+            if index_file.exists():
+                return FileResponse(index_file)
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
 static_dir = Path(__file__).resolve().parent / "static"
 
 # Keep the SPA fallback mount last so API and health routes remain reachable.
