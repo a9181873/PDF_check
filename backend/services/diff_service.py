@@ -251,18 +251,40 @@ def diff_tables(old_tables: list[ParsedTable], new_tables: list[ParsedTable]) ->
                 if old_cell == new_cell:
                     continue
 
-                diff_items.append(
-                    DiffItem(
-                        id="",
-                        diff_type=_guess_diff_type(old_cell or None, new_cell or None),
-                        old_value=old_cell or None,
-                        new_value=new_cell or None,
-                        old_bbox=old_table.bbox if old_cell else None,
-                        new_bbox=new_table.bbox if new_cell else None,
-                        context=f"{context} / row {row_index} col {col_index}",
-                        confidence=0.72,
+                if old_cell and new_cell:
+                    char_matcher = SequenceMatcher(a=old_cell, b=new_cell)
+                    for c_tag, c_i1, c_i2, c_j1, c_j2 in char_matcher.get_opcodes():
+                        if c_tag == "equal":
+                            continue
+                        
+                        old_sub = old_cell[c_i1:c_i2] if c_i1 < c_i2 else None
+                        new_sub = new_cell[c_j1:c_j2] if c_j1 < c_j2 else None
+                        
+                        diff_items.append(
+                            DiffItem(
+                                id="",
+                                diff_type=_guess_diff_type(old_sub, new_sub),
+                                old_value=old_sub,
+                                new_value=new_sub,
+                                old_bbox=None,
+                                new_bbox=None,
+                                context=f"{context} / row {row_index} col {col_index}",
+                                confidence=0.72,
+                            )
+                        )
+                else:
+                    diff_items.append(
+                        DiffItem(
+                            id="",
+                            diff_type=_guess_diff_type(old_cell or None, new_cell or None),
+                            old_value=old_cell or None,
+                            new_value=new_cell or None,
+                            old_bbox=None,
+                            new_bbox=None,
+                            context=f"{context} / row {row_index} col {col_index}",
+                            confidence=0.72,
+                        )
                     )
-                )
 
     return diff_items
 
