@@ -10,6 +10,7 @@ import SyncScrollContainer from '../components/SyncScrollContainer';
 import { checklistApi, buildApiUrl, buildWebSocketUrl, compareApi, reviewApi } from '../services/api';
 import { ChecklistItem, DiffReport } from '../services/types';
 import { useCompareStore } from '../stores/compareStore';
+import { useCrossWindowSync } from '../hooks/useCrossWindowSync';
 
 const ChecklistUpload = lazy(() => import('../components/ChecklistUpload'));
 const DiffPopup = lazy(() => import('../components/DiffPopup'));
@@ -89,6 +90,18 @@ const ComparePage: React.FC = () => {
   const [showChecklistUpload, setShowChecklistUpload] = useState(false);
   const [activeTab, setActiveTab] = useState<'diffs' | 'checklist'>('diffs');
   const [showExportMenu, setShowExportMenu] = useState(false);
+
+  const { broadcastPageChange, broadcastDiffSelect } = useCrossWindowSync(taskId || null);
+
+  const handlePageChange = (side: 'old' | 'new', page: number) => {
+    setCurrentPage(side, page);
+    broadcastPageChange(side, page);
+  };
+
+  const handleDiffClick = (diff: any) => {
+    openDiffPopup(diff);
+    broadcastDiffSelect(diff.id);
+  };
 
   const loadChecklist = useCallback(
     async (comparisonId: string) => {
@@ -605,7 +618,7 @@ const ComparePage: React.FC = () => {
                       <PDFViewer
                         file={getPdfUrl('old')}
                         currentPage={currentPage.old}
-                        onPageChange={(page) => setCurrentPage('old', page)}
+                        onPageChange={(page) => handlePageChange('old', page)}
                         scale={1.0}
                         grayscale
                         showControls={false}
@@ -616,7 +629,7 @@ const ComparePage: React.FC = () => {
                           canvasWidth={800}
                           pageWidth={595}
                           pageHeight={842}
-                          onDiffClick={openDiffPopup}
+                          onDiffClick={handleDiffClick}
                         />
                       </PDFViewer>
                     }
@@ -624,7 +637,7 @@ const ComparePage: React.FC = () => {
                       <PDFViewer
                         file={getPdfUrl('new')}
                         currentPage={currentPage.new}
-                        onPageChange={(page) => setCurrentPage('new', page)}
+                        onPageChange={(page) => handlePageChange('new', page)}
                         scale={1.0}
                         grayscale
                         showControls={false}
@@ -635,7 +648,7 @@ const ComparePage: React.FC = () => {
                           canvasWidth={800}
                           pageWidth={595}
                           pageHeight={842}
-                          onDiffClick={openDiffPopup}
+                          onDiffClick={handleDiffClick}
                         />
                       </PDFViewer>
                     }
@@ -643,6 +656,7 @@ const ComparePage: React.FC = () => {
                     onSyncToggle={setScrollSyncEnabled}
                     leftHidden={leftPanelHidden}
                     onLeftHiddenToggle={toggleLeftPanel}
+                    taskId={taskId}
                     className="h-full"
                   />
                 </div>

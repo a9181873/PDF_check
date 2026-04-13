@@ -15,6 +15,8 @@ function RouteFallback() {
   );
 }
 
+const PopoutPage = lazy(() => import('./pages/PopoutPage'));
+
 function App() {
   return (
     <BrowserRouter>
@@ -22,6 +24,7 @@ function App() {
         <Routes>
           <Route path="/" element={<UploadPage />} />
           <Route path="/compare/:taskId" element={<ComparePage />} />
+          <Route path="/popout/:taskId/:version" element={<PopoutPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>

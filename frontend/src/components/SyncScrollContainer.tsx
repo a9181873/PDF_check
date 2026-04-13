@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef } from 'react';
-import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen, ExternalLink } from 'lucide-react';
+import { useCrossWindowSync } from '../hooks/useCrossWindowSync';
 
 interface SyncScrollContainerProps {
   leftContent: React.ReactNode;
@@ -8,6 +9,7 @@ interface SyncScrollContainerProps {
   onSyncToggle?: (enabled: boolean) => void;
   leftHidden?: boolean;
   onLeftHiddenToggle?: (hidden: boolean) => void;
+  taskId?: string;
   className?: string;
 }
 
@@ -18,12 +20,15 @@ const SyncScrollContainer: React.FC<SyncScrollContainerProps> = ({
   onSyncToggle,
   leftHidden = false,
   onLeftHiddenToggle,
+  taskId,
   className = '',
 }) => {
   const leftRef = useRef<HTMLDivElement>(null);
   const rightRef = useRef<HTMLDivElement>(null);
   const isSyncingRef = useRef(false);
   const unlockTimerRef = useRef<number | null>(null);
+
+  const { broadcastScroll } = useCrossWindowSync(taskId || null);
 
   // Sync scroll positions
   const syncScroll = useCallback((source: 'left' | 'right', target: 'left' | 'right') => {
@@ -46,6 +51,7 @@ const SyncScrollContainer: React.FC<SyncScrollContainerProps> = ({
       if (sourceScrollable > 0 && targetScrollable > 0) {
         const sourceRatio = sourceScrollTop / sourceScrollable;
         targetEl.scrollTop = sourceRatio * targetScrollable;
+        broadcastScroll(source === 'left' ? 'old' : 'new', sourceRatio);
       }
     }
 
@@ -84,6 +90,37 @@ const SyncScrollContainer: React.FC<SyncScrollContainerProps> = ({
       }
     };
   }, [syncScroll]);
+
+  // Listen for incoming cross-window scroll events
+  useEffect(() => {
+    const handleCrossWindowScroll = (e: Event) => {
+      const customEvent = e as CustomEvent<{ source: 'old' | 'new', ratio: number }>;
+      const { source, ratio } = customEvent.detail;
+      
+      const targetEl = source === 'old' ? rightRef.current : leftRef.current;
+      const otherEl = source === 'old' ? leftRef.current : rightRef.current;
+      
+      if (targetEl) {
+        isSyncingRef.current = true;
+        const scrollable = targetEl.scrollHeight - targetEl.clientHeight;
+        if (scrollable > 0) targetEl.scrollTop = ratio * scrollable;
+      }
+      if (otherEl && source === 'old') {
+        const scrollable = otherEl.scrollHeight - otherEl.clientHeight;
+        if (scrollable > 0) otherEl.scrollTop = ratio * scrollable;
+      }
+      if (otherEl && source === 'new') {
+        const scrollable = otherEl.scrollHeight - otherEl.clientHeight;
+         if (scrollable > 0) otherEl.scrollTop = ratio * scrollable;
+      }
+
+      if (unlockTimerRef.current) window.clearTimeout(unlockTimerRef.current);
+      unlockTimerRef.current = window.setTimeout(() => { isSyncingRef.current = false; }, 50);
+    };
+
+    window.addEventListener('cross-window-scroll', handleCrossWindowScroll);
+    return () => window.removeEventListener('cross-window-scroll', handleCrossWindowScroll);
+  }, []);
 
   const handleToggleLeftPanel = () => {
     onLeftHiddenToggle?.(!leftHidden);
@@ -124,6 +161,13 @@ const SyncScrollContainer: React.FC<SyncScrollContainerProps> = ({
                 title="隱藏左側面板"
               >
                 <PanelLeftClose size={18} />
+              </button>
+              <button
+                onClick={() => taskId && window.open(`/popout/${taskId}/old`, '_blank', 'width=800,height=900,menubar=no,toolbar=no,location=no')}
+                className="p-2 rounded hover:bg-gray-200 transition-colors text-gray-500"
+                title="用新視窗彈出 (雙螢幕模式)"
+              >
+                <ExternalLink size={18} />
               </button>
             </div>
           </div>
@@ -181,6 +225,13 @@ const SyncScrollContainer: React.FC<SyncScrollContainerProps> = ({
                   <PanelLeftOpen size={18} />
                 </button>
               )}
+              <button
+                onClick={() => taskId && window.open(`/popout/${taskId}/new`, '_blank', 'width=800,height=900,menubar=no,toolbar=no,location=no')}
+                className="p-2 rounded hover:bg-gray-200 transition-colors text-gray-500"
+                title="用新視窗彈出 (雙螢幕模式)"
+              >
+                <ExternalLink size={18} />
+              </button>
             </div>
           </div>
           <div
