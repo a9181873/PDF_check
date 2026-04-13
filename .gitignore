@@ -33,3 +33,6 @@ frontend/dist/
 # Temporary transfer/cache folders
 .tmp.drivedownload/
 .tmp.driveupload/
+
+# Large files
+*.tar

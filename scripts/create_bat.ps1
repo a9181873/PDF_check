@@ -1,0 +1,102 @@
+$startContent = @"
+@echo off
+chcp 950 >nul
+setlocal enabledelayedexpansion
+
+cd /d "%~dp0"
+
+echo ====================================
+echo   PDF 比對系統 - 一鍵啟動
+echo ====================================
+echo 檢查 Docker 狀態...
+
+where docker >nul 2>&1
+if errorlevel 1 (
+  echo [錯誤] 找不到 Docker，請先確認已安裝 Docker Desktop 並加入環境變數。
+  echo.
+  pause
+  exit /b 1
+)
+
+docker info >nul 2>&1
+if errorlevel 1 (
+  echo [錯誤] Docker 尚未啟動，請先開啟 Docker Desktop 應用程式，等它準備好後再試一次。
+  echo.
+  pause
+  exit /b 1
+)
+
+echo 正在啟動後台服務與容器...
+docker compose up -d
+if errorlevel 1 (
+  echo.
+  echo [錯誤] 啟動失敗，請檢查上方錯誤訊息 (或確認 Port 8000 是否被佔用)。
+  echo.
+  pause
+  exit /b 1
+)
+
+echo.
+echo 啟動成功！正在準備開啟系統介面...
+timeout /t 5 /nobreak >nul
+start "" "http://localhost:8000"
+
+echo.
+echo ====================================
+echo 系統已順利於背景運作！
+echo 介面網址: http://localhost:8000
+echo.
+echo * 若要關閉系統，請執行資料夾內的 [一鍵停止PDF比對系統.bat]
+echo ====================================
+pause
+"@
+
+$stopContent = @"
+@echo off
+chcp 950 >nul
+setlocal
+
+cd /d "%~dp0"
+
+echo ====================================
+echo   PDF 比對系統 - 一鍵停止
+echo ====================================
+
+where docker >nul 2>&1
+if errorlevel 1 (
+  echo 找不到 Docker。
+  echo.
+  pause
+  exit /b 1
+)
+
+docker info >nul 2>&1
+if errorlevel 1 (
+  echo Docker 尚未啟動，無法執行停止。
+  echo.
+  pause
+  exit /b 1
+)
+
+docker compose down
+if errorlevel 1 (
+  echo.
+  echo 停止失敗，請檢查上方訊息。
+  echo.
+  pause
+  exit /b 1
+)
+
+echo.
+echo 已停止服務。
+echo.
+pause
+"@
+
+$big5 = [System.Text.Encoding]::GetEncoding(950)
+$basePath = Split-Path $PSScriptRoot -Parent
+
+[System.IO.File]::WriteAllText("$basePath\一鍵啟動PDF比對系統.bat", $startContent, $big5)
+[System.IO.File]::WriteAllText("$basePath\一鍵停止PDF比對系統.bat", $stopContent, $big5)
+
+Write-Host "Done! Both .bat files have been re-encoded as Big5 (CP950)."

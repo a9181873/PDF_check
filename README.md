@@ -129,12 +129,14 @@ PDF_check/
 
 ## 啟動方式
 
-### 一鍵啟動
+### 一鍵啟動 / 停止
 
-- macOS: 雙擊 `一鍵啟動PDF比對系統.command`
-- Windows: 雙擊 `一鍵啟動PDF比對系統.bat`
+- **Windows啟動**: 雙擊 `一鍵啟動PDF比對系統.bat`
+- **Windows停止**: 雙擊 `一鍵停止PDF比對系統.bat`
+- **macOS啟動**: 雙擊 `一鍵啟動PDF比對系統.command`
+- **macOS停止**: 雙擊 `一鍵停止PDF比對系統.command`
 
-腳本會先檢查 Docker 是否存在與是否啟動，再執行 `docker compose up --build -d`，接著輪詢 `http://localhost:8000/health`，只有服務可用後才自動開啟畫面。
+啟動腳本會先檢查 Docker 是否存在與是否啟動，再執行 `docker compose up -d`，接著輪詢確認服務可用後才自動開啟畫面。
 
 ### Docker 啟動
 
