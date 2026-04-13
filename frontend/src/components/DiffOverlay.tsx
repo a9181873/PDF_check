@@ -13,6 +13,7 @@ interface DiffOverlayProps {
   pdfPageWidth: number;
   /** Original PDF page height in PDF points (usually 842 for A4) */
   pdfPageHeight: number;
+  selectedDiffId?: string | null;
   onDiffClick?: (diff: DiffItem) => void;
 }
 
@@ -53,6 +54,7 @@ const DiffOverlay: React.FC<DiffOverlayProps> = ({
   renderedHeight,
   pdfPageWidth,
   pdfPageHeight,
+  selectedDiffId = null,
   onDiffClick,
 }) => {
   // Filter diffs for this specific page
@@ -81,11 +83,12 @@ const DiffOverlay: React.FC<DiffOverlayProps> = ({
 
         const colorClass = getDiffColor(diff.diff_type);
         const label = getDiffLabel(diff.diff_type);
+        const isSelected = selectedDiffId === diff.id;
 
         return (
           <div
             key={diff.id}
-            className={`${colorClass} cursor-pointer group pointer-events-auto`}
+            className={`${colorClass} cursor-pointer group pointer-events-auto ${isSelected ? 'is-selected' : ''}`}
             style={{
               position: 'absolute',
               left: `${x}px`,

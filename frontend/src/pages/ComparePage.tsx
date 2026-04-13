@@ -4,6 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { AlertCircle, BarChart3, ChevronDown, Download, Eye, EyeOff, Upload } from 'lucide-react';
 
 import ChecklistPanel from '../components/ChecklistPanel';
+import DiffListPanel from '../components/DiffListPanel';
 import DiffOverlay from '../components/DiffOverlay';
 import SearchBar from '../components/SearchBar';
 import SyncScrollContainer from '../components/SyncScrollContainer';
@@ -88,6 +89,7 @@ const ComparePage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showChecklistUpload, setShowChecklistUpload] = useState(false);
+  const [leftTab, setLeftTab] = useState<'diff_list' | 'checklist'>('diff_list');
   const [activeTab, setActiveTab] = useState<'diffs' | 'checklist'>('diffs');
   const [showExportMenu, setShowExportMenu] = useState(false);
 
@@ -534,48 +536,76 @@ const ComparePage: React.FC = () => {
             </div>
           </div>
 
-          <div className="p-4 border-b border-[#e7ece8]">
-            <SearchBar
-              diffItems={filteredItems}
-              searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
-              selectedDiffId={selectedDiffId}
-              onDiffSelect={setSelectedDiffId}
-            />
+          <div className="flex border-b border-[#e7ece8]">
+            <button
+              onClick={() => setLeftTab('diff_list')}
+              className={`flex-1 py-3 text-sm font-medium transition-colors ${leftTab === 'diff_list' ? 'text-primary-700 border-b-2 border-primary-600 bg-white/50' : 'text-gray-500 hover:text-gray-800'}`}
+            >
+              差異清單
+            </button>
+            <button
+              onClick={() => setLeftTab('checklist')}
+              className={`flex-1 py-3 text-sm font-medium transition-colors ${leftTab === 'checklist' ? 'text-primary-700 border-b-2 border-primary-600 bg-white/50' : 'text-gray-500 hover:text-gray-800'}`}
+            >
+              外部核對表
+            </button>
           </div>
 
-          <div className="flex-1 p-4 overflow-auto">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-medium text-gray-900">核對清單</h3>
-              <button
-                type="button"
-                onClick={() => setShowChecklistUpload(true)}
-                className="text-sm px-3 py-1.5 bg-primary-50 text-primary-700 rounded-xl border border-primary-100 hover:bg-primary-100 transition-colors"
-              >
-                + 上傳
-              </button>
-            </div>
-
-            {checklist.length > 0 ? (
-              <ChecklistPanel
-                items={checklist}
-                comparisonId={taskId!}
-                onItemUpdate={handleChecklistUpdate}
-              />
-            ) : (
-              <div className="text-center py-8 rounded-3xl bg-[#F5F5F5] border border-gray-200">
-                <div className="w-12 h-12 mx-auto mb-4 bg-white rounded-full flex items-center justify-center shadow-soft">
-                  <BarChart3 className="text-primary-600" size={20} />
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {leftTab === 'diff_list' ? (
+              <>
+                <div className="p-3 border-b border-[#e7ece8]">
+                  <SearchBar
+                    diffItems={filteredItems}
+                    searchQuery={searchQuery}
+                    onSearchChange={setSearchQuery}
+                    selectedDiffId={selectedDiffId}
+                    onDiffSelect={setSelectedDiffId}
+                  />
                 </div>
-                <p className="text-gray-700 mb-2">尚未上傳核對清單</p>
-                <p className="text-gray-500 text-sm mb-4">上傳 CSV 或 Excel 檔案以開始核對</p>
-                <button
-                  type="button"
-                  onClick={() => setShowChecklistUpload(true)}
-                  className="px-4 py-2 bg-primary-600 text-white rounded-xl hover:bg-primary-700 transition-colors text-sm"
-                >
-                  上傳核對清單
-                </button>
+                <div className="flex-1 overflow-hidden">
+                  <DiffListPanel
+                    diffItems={filteredItems}
+                    selectedDiffId={selectedDiffId}
+                    onDiffSelect={setSelectedDiffId}
+                  />
+                </div>
+              </>
+            ) : (
+              <div className="flex-1 p-4 overflow-auto">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-medium text-gray-900">核對清單</h3>
+                  <button
+                    type="button"
+                    onClick={() => setShowChecklistUpload(true)}
+                    className="text-sm px-3 py-1.5 bg-primary-50 text-primary-700 rounded-xl border border-primary-100 hover:bg-primary-100 transition-colors"
+                  >
+                    + 上傳
+                  </button>
+                </div>
+
+                {checklist.length > 0 ? (
+                  <ChecklistPanel
+                    items={checklist}
+                    comparisonId={taskId!}
+                    onItemUpdate={handleChecklistUpdate}
+                  />
+                ) : (
+                  <div className="text-center py-8 rounded-3xl bg-[#F5F5F5] border border-gray-200">
+                    <div className="w-12 h-12 mx-auto mb-4 bg-white rounded-full flex items-center justify-center shadow-soft">
+                      <BarChart3 className="text-primary-600" size={20} />
+                    </div>
+                    <p className="text-gray-700 mb-2">尚未上傳核對清單</p>
+                    <p className="text-gray-500 text-sm mb-4">上傳 CSV 或 Excel 檔案以開始核對</p>
+                    <button
+                      type="button"
+                      onClick={() => setShowChecklistUpload(true)}
+                      className="px-4 py-2 bg-primary-600 text-white rounded-xl hover:bg-primary-700 transition-colors text-sm"
+                    >
+                      上傳核對清單
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>

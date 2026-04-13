@@ -123,22 +123,36 @@
   }
 
   .diff-overlay {
-    @apply absolute border-2 pointer-events-auto opacity-70 hover:opacity-100 transition-opacity;
+    @apply absolute pointer-events-auto mix-blend-multiply opacity-50 transition-all duration-200 border border-transparent;
+  }
+
+  .diff-overlay:hover, .diff-overlay.is-selected {
+    @apply border-solid border opacity-100 shadow-md ring-2 bg-opacity-20;
+    z-index: 10;
+    mix-blend-mode: normal;
+  }
+
+  .diff-overlay.is-selected {
+    @apply ring-4 z-20 scale-[1.02];
   }
 
   .diff-overlay-added {
-    @apply diff-overlay border-diff-added bg-diff-added/10;
+    @apply diff-overlay bg-diff-added hover:border-diff-added hover:ring-diff-added/30;
   }
+  .diff-overlay-added.is-selected { @apply ring-diff-added/50 border-diff-added; }
 
   .diff-overlay-deleted {
-    @apply diff-overlay border-diff-deleted bg-diff-deleted/10;
+    @apply diff-overlay bg-diff-deleted hover:border-diff-deleted hover:ring-diff-deleted/30;
   }
+  .diff-overlay-deleted.is-selected { @apply ring-diff-deleted/50 border-diff-deleted; }
 
   .diff-overlay-modified {
-    @apply diff-overlay border-diff-modified bg-diff-modified/10;
+    @apply diff-overlay bg-diff-modified hover:border-diff-modified hover:ring-diff-modified/30;
   }
+  .diff-overlay-modified.is-selected { @apply ring-diff-modified/50 border-diff-modified; }
 
   .diff-overlay-text {
-    @apply diff-overlay border-diff-text bg-diff-text/10;
+    @apply diff-overlay bg-diff-text hover:border-diff-text hover:ring-diff-text/30;
   }
+  .diff-overlay-text.is-selected { @apply ring-diff-text/50 border-diff-text; }
 }

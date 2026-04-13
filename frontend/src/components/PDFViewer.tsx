@@ -23,6 +23,8 @@ interface PDFViewerProps {
   showControls?: boolean;
   /** Diff items to overlay on each page */
   diffItems?: DiffItem[];
+  /** Expected ID of the currently selected diff */
+  selectedDiffId?: string | null;
   /** Callback when a diff overlay rectangle is clicked */
   onDiffClick?: (diff: DiffItem) => void;
 }
@@ -48,6 +50,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   className = '',
   showControls = true,
   diffItems = [],
+  selectedDiffId = null,
   onDiffClick,
 }) => {
   const [numPages, setNumPages] = useState<number | null>(null);
@@ -275,6 +278,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                           {dims && diffItems.length > 0 && (
                             <DiffOverlay
                               diffItems={diffItems}
+                              selectedDiffId={selectedDiffId}
                               pageNumber={pageNum}
                               renderedWidth={dims.width}
                               renderedHeight={dims.height}
