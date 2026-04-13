@@ -123,36 +123,59 @@
   }
 
   .diff-overlay {
-    @apply absolute pointer-events-auto mix-blend-multiply opacity-50 transition-all duration-200 border border-transparent;
+    position: absolute;
+    pointer-events: auto;
+    transition: all 0.2s ease-in-out;
+    border: 2px solid transparent;
+    opacity: 0.4;
+    mix-blend-mode: multiply;
   }
 
   .diff-overlay:hover, .diff-overlay.is-selected {
-    @apply border-solid border opacity-100 shadow-md ring-2 bg-opacity-20;
-    z-index: 10;
+    opacity: 1 !important;
+    z-index: 20;
     mix-blend-mode: normal;
+    border-style: solid;
+    border-width: 2px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
   }
 
   .diff-overlay.is-selected {
-    @apply ring-4 z-20 scale-[1.02];
+    z-index: 30;
+    border-width: 3px;
+    box-shadow: 0 0 0 3px rgba(0,0,0,0.1);
   }
 
+  /* Color mapping from Tailwind config */
   .diff-overlay-added {
-    @apply diff-overlay bg-diff-added hover:border-diff-added hover:ring-diff-added/30;
+    background-color: #009944;
   }
-  .diff-overlay-added.is-selected { @apply ring-diff-added/50 border-diff-added; }
+  .diff-overlay-added:hover, .diff-overlay-added.is-selected {
+    border-color: #009944;
+    background-color: rgba(0, 153, 68, 0.2);
+  }
 
   .diff-overlay-deleted {
-    @apply diff-overlay bg-diff-deleted hover:border-diff-deleted hover:ring-diff-deleted/30;
+    background-color: #E60012;
   }
-  .diff-overlay-deleted.is-selected { @apply ring-diff-deleted/50 border-diff-deleted; }
+  .diff-overlay-deleted:hover, .diff-overlay-deleted.is-selected {
+    border-color: #E60012;
+    background-color: rgba(230, 0, 18, 0.2);
+  }
 
   .diff-overlay-modified {
-    @apply diff-overlay bg-diff-modified hover:border-diff-modified hover:ring-diff-modified/30;
+    background-color: #ff9800;
   }
-  .diff-overlay-modified.is-selected { @apply ring-diff-modified/50 border-diff-modified; }
+  .diff-overlay-modified:hover, .diff-overlay-modified.is-selected {
+    border-color: #ff9800;
+    background-color: rgba(255, 152, 0, 0.2);
+  }
 
   .diff-overlay-text {
-    @apply diff-overlay bg-diff-text hover:border-diff-text hover:ring-diff-text/30;
+    background-color: #673ab7;
   }
-  .diff-overlay-text.is-selected { @apply ring-diff-text/50 border-diff-text; }
+  .diff-overlay-text:hover, .diff-overlay-text.is-selected {
+    border-color: #673ab7;
+    background-color: rgba(103, 58, 183, 0.2);
+  }
 }

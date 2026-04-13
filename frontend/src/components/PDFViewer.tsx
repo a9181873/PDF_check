@@ -265,8 +265,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                             pageNumber={pageNum}
                             scale={scale}
                             rotate={rotation}
-                            renderTextLayer
-                            renderAnnotationLayer
+                            renderTextLayer={false}
+                            renderAnnotationLayer={false}
                             className="pdf-page shadow-md"
                             onLoadSuccess={(page) => handlePageLoadSuccess(pageNum, page)}
                           />
