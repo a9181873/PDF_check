@@ -130,11 +130,30 @@ def _parse_via_docling(pdf_path: Path) -> ParsedDocument:
 
         first_prov = prov[0]
         page_no = int(getattr(first_prov, "page_no", 1))
+        page_height = page_heights.get(page_no, DEFAULT_PAGE_HEIGHT_PT)
+
+        if type(item).__name__ == "TableItem":
+            # Extract individual cells instead of the whole table string
+            data = getattr(item, "data", None)
+            cells = getattr(data, "table_cells", []) if data else []
+            for cell in cells:
+                cell_text = str(getattr(cell, "text", "")).strip()
+                if not cell_text:
+                    continue
+                c_prov = getattr(cell, "prov", None)
+                if c_prov:
+                    c_bbox_obj = getattr(c_prov[0], "bbox", None)
+                    if c_bbox_obj:
+                        c_page_no = int(getattr(c_prov[0], "page_no", page_no))
+                        c_page_height = page_heights.get(c_page_no, DEFAULT_PAGE_HEIGHT_PT)
+                        cell_bbox = _bbox_from_docling(page_no=c_page_no, bbox_obj=c_bbox_obj, page_height=c_page_height)
+                        paragraphs.append(ParsedParagraph(text=cell_text, bbox=cell_bbox))
+            continue
+
         bbox_obj = getattr(first_prov, "bbox", None)
         if not bbox_obj:
             continue
 
-        page_height = page_heights.get(page_no, DEFAULT_PAGE_HEIGHT_PT)
         bbox = _bbox_from_docling(page_no=page_no, bbox_obj=bbox_obj, page_height=page_height)
         paragraphs.append(ParsedParagraph(text=text, bbox=bbox))
 
