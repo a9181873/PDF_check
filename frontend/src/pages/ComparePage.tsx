@@ -1,7 +1,7 @@
 import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { isAxiosError } from 'axios';
 import { useNavigate, useParams } from 'react-router-dom';
-import { AlertCircle, BarChart3, ChevronDown, Download, Eye, EyeOff, Upload } from 'lucide-react';
+import { AlertCircle, BarChart3, ChevronDown, Download, Eye, EyeOff, Upload, ZoomIn, ZoomOut } from 'lucide-react';
 
 import ChecklistPanel from '../components/ChecklistPanel';
 import DiffListPanel from '../components/DiffListPanel';
@@ -80,6 +80,8 @@ const ComparePage: React.FC = () => {
     setCurrentPage,
     setScrollSyncEnabled,
     setGrayscaleEnabled,
+    scale,
+    setScale,
     openDiffPopup,
     closeDiffPopup,
     confirmDiff: storeConfirmDiff,
@@ -105,6 +107,21 @@ const ComparePage: React.FC = () => {
     setSelectedDiffId(diff.id);
     openDiffPopup(diff);
     broadcastDiffSelect(diff.id);
+  };
+
+  const handleListDiffClick = (diffId: string) => {
+    setSelectedDiffId(diffId);
+    broadcastDiffSelect(diffId);
+    const diff = filteredItems?.find((d) => d.id === diffId);
+    if (diff) {
+      openDiffPopup(diff);
+      if (diff.old_bbox && currentPage.old !== diff.old_bbox.page) {
+        handlePageChange('old', diff.old_bbox.page);
+      }
+      if (diff.new_bbox && currentPage.new !== diff.new_bbox.page) {
+        handlePageChange('new', diff.new_bbox.page);
+      }
+    }
   };
 
   const loadChecklist = useCallback(
@@ -416,6 +433,39 @@ const ComparePage: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-3">
+            <div className="flex items-center space-x-1 border border-gray-200 rounded-xl bg-white/50 px-2 py-1.5 backdrop-blur">
+              <button
+                type="button"
+                onClick={() => setScale(Math.max(0.25, scale - 0.25))}
+                className="p-1.5 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                title="縮小"
+              >
+                <ZoomOut size={16} />
+              </button>
+              <span className="text-sm font-medium w-12 text-center text-gray-700">{Math.round(scale * 100)}%</span>
+              <button
+                type="button"
+                onClick={() => setScale(Math.min(3.0, scale + 0.25))}
+                className="p-1.5 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                title="放大"
+              >
+                <ZoomIn size={16} />
+              </button>
+            </div>
+            
+            <button
+              type="button"
+              onClick={() => setGrayscaleEnabled(!grayscaleEnabled)}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border transition-colors text-sm font-medium ${
+                grayscaleEnabled 
+                  ? 'border-primary-200 bg-primary-50 text-primary-700' 
+                  : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+              }`}
+              title="切換灰階模式"
+            >
+              灰階
+            </button>
+
             <button
               type="button"
               onClick={() => navigate('/')}
@@ -569,7 +619,7 @@ const ComparePage: React.FC = () => {
                   <DiffListPanel
                     diffItems={filteredItems}
                     selectedDiffId={selectedDiffId}
-                    onDiffSelect={setSelectedDiffId}
+                    onDiffSelect={handleListDiffClick}
                   />
                 </div>
               </>
@@ -651,7 +701,7 @@ const ComparePage: React.FC = () => {
                         file={getPdfUrl('old')}
                         currentPage={currentPage.old}
                         onPageChange={(page) => handlePageChange('old', page)}
-                        scale={1.0}
+                        scale={scale}
                         grayscale={grayscaleEnabled}
                         onGrayscaleChange={setGrayscaleEnabled}
                         showControls={false}
@@ -665,7 +715,7 @@ const ComparePage: React.FC = () => {
                         file={getPdfUrl('new')}
                         currentPage={currentPage.new}
                         onPageChange={(page) => handlePageChange('new', page)}
-                        scale={1.0}
+                        scale={scale}
                         grayscale={grayscaleEnabled}
                         onGrayscaleChange={setGrayscaleEnabled}
                         showControls={false}

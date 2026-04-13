@@ -1,8 +1,10 @@
 import re
+import unicodedata
+from dataclasses import dataclass
 from difflib import SequenceMatcher
 from itertools import zip_longest
 
-from models.diff_models import DiffItem, DiffType
+from models.diff_models import DiffItem, DiffType, BBox
 from services.parser_service import ParsedDocument, ParsedParagraph, ParsedTable
 
 NUMBER_PATTERN = re.compile(r"\d+(?:\.\d+)?%?")
@@ -36,6 +38,11 @@ def _contains_number(text: str | None) -> bool:
         return False
     return bool(NUMBER_PATTERN.search(text))
 
+def is_meaningful_diff(old_val: str | None, new_val: str | None) -> bool:
+    v1 = unicodedata.normalize('NFKC', (old_val or "").strip())
+    v2 = unicodedata.normalize('NFKC', (new_val or "").strip())
+    return v1 != v2
+
 
 def _guess_diff_type(old_value: str | None, new_value: str | None) -> DiffType:
     if old_value and new_value:
@@ -47,113 +54,125 @@ def _guess_diff_type(old_value: str | None, new_value: str | None) -> DiffType:
     return DiffType.ADDED
 
 
+@dataclass
+class TextToken:
+    text: str
+    paragraph: ParsedParagraph
+    start_char_idx: int
+    end_char_idx: int
+
+def _tokenize_paragraphs(paragraphs: list[ParsedParagraph]) -> list[TextToken]:
+    tokens = []
+    for p in paragraphs:
+        for match in re.finditer(r'\S+', p.text):
+            tokens.append(TextToken(
+                text=match.group(0),
+                paragraph=p,
+                start_char_idx=match.start(),
+                end_char_idx=match.end()
+            ))
+    return tokens
+
+def _group_tokens_by_paragraph(tokens: list[TextToken]) -> list[list[TextToken]]:
+    if not tokens:
+        return []
+    groups = []
+    current_group = [tokens[0]]
+    for t in tokens[1:]:
+        if t.paragraph is current_group[-1].paragraph:
+            current_group.append(t)
+        else:
+            groups.append(current_group)
+            current_group = [t]
+    groups.append(current_group)
+    return groups
+
+def _get_bbox_for_token_group(group: list[TextToken]) -> tuple[str, BBox | None]:
+    if not group:
+        return "", None
+    p = group[0].paragraph
+    full_text = p.text
+    full_bbox = p.bbox
+    start_idx = group[0].start_char_idx
+    end_idx = group[-1].end_char_idx
+    
+    sub_text = full_text[start_idx:end_idx]
+    
+    if not full_bbox:
+        return sub_text, None
+        
+    height = full_bbox.y1 - full_bbox.y0
+    if height > 35:
+        # multiline wrap heavily compromises linear interpolation
+        return sub_text, full_bbox
+        
+    length = max(len(full_text), 1)
+    frac_start = start_idx / length
+    frac_end = end_idx / length
+    width = full_bbox.x1 - full_bbox.x0
+    refined_bbox = BBox(
+        page=full_bbox.page,
+        x0=full_bbox.x0 + width * frac_start,
+        y0=full_bbox.y0,
+        x1=full_bbox.x0 + width * frac_end,
+        y1=full_bbox.y1
+    )
+    return sub_text, refined_bbox
+
 def diff_paragraphs(
     old_paragraphs: list[ParsedParagraph],
     new_paragraphs: list[ParsedParagraph],
 ) -> list[DiffItem]:
-    old_texts = [_normalize(p.text) for p in old_paragraphs]
-    new_texts = [_normalize(p.text) for p in new_paragraphs]
+    old_tokens = _tokenize_paragraphs(old_paragraphs)
+    new_tokens = _tokenize_paragraphs(new_paragraphs)
 
-    matcher = SequenceMatcher(a=old_texts, b=new_texts)
+    old_words = [unicodedata.normalize('NFKC', t.text) for t in old_tokens]
+    new_words = [unicodedata.normalize('NFKC', t.text) for t in new_tokens]
+
+    matcher = SequenceMatcher(a=old_words, b=new_words, autojunk=False)
     diff_items: list[DiffItem] = []
 
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "equal":
             continue
 
-        if tag == "replace":
-            old_slice = old_paragraphs[i1:i2]
-            new_slice = new_paragraphs[j1:j2]
-            paired_count = min(len(old_slice), len(new_slice))
-
-            for offset in range(paired_count):
-                old_item = old_slice[offset]
-                new_item = new_slice[offset]
-                char_matcher = SequenceMatcher(a=old_item.text, b=new_item.text)
-                for c_tag, c_i1, c_i2, c_j1, c_j2 in char_matcher.get_opcodes():
-                    if c_tag == "equal":
-                        continue
-                    
-                    old_sub = old_item.text[c_i1:c_i2] if c_i1 < c_i2 else None
-                    new_sub = new_item.text[c_j1:c_j2] if c_j1 < c_j2 else None
-                    
-                    old_sub_bbox = refine_bbox_for_text(old_item.text, old_item.bbox, c_i1, c_i2) if old_item.bbox and old_sub else None
-                    new_sub_bbox = refine_bbox_for_text(new_item.text, new_item.bbox, c_j1, c_j2) if new_item.bbox and new_sub else None
-
-                    confidence = SequenceMatcher(
-                        a=_normalize(old_item.text), b=_normalize(new_item.text)
-                    ).ratio()
-
-                    diff_items.append(
-                        DiffItem(
-                            id="",
-                            diff_type=_guess_diff_type(old_sub, new_sub),
-                            old_value=old_sub,
-                            new_value=new_sub,
-                            old_bbox=old_sub_bbox,
-                            new_bbox=new_sub_bbox,
-                            context=f"Page {new_item.bbox.page if hasattr(new_item, 'bbox') and new_item.bbox else 'N/A'}",
-                            confidence=confidence,
-                        )
-                    )
-
-            for old_extra in old_slice[paired_count:]:
-                diff_items.append(
-                    DiffItem(
-                        id="",
-                        diff_type=DiffType.DELETED,
-                        old_value=old_extra.text,
-                        new_value=None,
-                        old_bbox=old_extra.bbox,
-                        new_bbox=None,
-                        context=f"Page {old_extra.bbox.page}",
-                        confidence=0.7,
-                    )
+        old_slice = old_tokens[i1:i2]
+        new_slice = new_tokens[j1:j2]
+        
+        old_groups = _group_tokens_by_paragraph(old_slice)
+        new_groups = _group_tokens_by_paragraph(new_slice)
+        
+        paired_count = max(len(old_groups), len(new_groups))
+        
+        for idx in range(paired_count):
+            og = old_groups[idx] if idx < len(old_groups) else []
+            ng = new_groups[idx] if idx < len(new_groups) else []
+            
+            old_str, old_bbox = _get_bbox_for_token_group(og)
+            new_str, new_bbox = _get_bbox_for_token_group(ng)
+            
+            if not is_meaningful_diff(old_str, new_str):
+                continue
+                
+            dtype = _guess_diff_type(old_str if old_str else None, new_str if new_str else None)
+            
+            page_ctx = []
+            if og and og[0].paragraph.bbox: page_ctx.append(f"Page {og[0].paragraph.bbox.page}")
+            if ng and ng[0].paragraph.bbox: page_ctx.append(f"Page {ng[0].paragraph.bbox.page}")
+            ctx = " / ".join(set(page_ctx)) if page_ctx else "N/A"
+            
+            diff_items.append(
+                DiffItem(
+                    id="",
+                    diff_type=dtype,
+                    old_value=old_str if old_str else None,
+                    new_value=new_str if new_str else None,
+                    old_bbox=old_bbox,
+                    new_bbox=new_bbox,
+                    context=ctx,
+                    confidence=0.85,
                 )
-
-            for new_extra in new_slice[paired_count:]:
-                diff_items.append(
-                    DiffItem(
-                        id="",
-                        diff_type=DiffType.ADDED,
-                        old_value=None,
-                        new_value=new_extra.text,
-                        old_bbox=None,
-                        new_bbox=new_extra.bbox,
-                        context=f"Page {new_extra.bbox.page}",
-                        confidence=0.7,
-                    )
-                )
-
-        if tag == "delete":
-            for old_item in old_paragraphs[i1:i2]:
-                diff_items.append(
-                    DiffItem(
-                        id="",
-                        diff_type=DiffType.DELETED,
-                        old_value=old_item.text,
-                        new_value=None,
-                        old_bbox=old_item.bbox,
-                        new_bbox=None,
-                        context=f"Page {old_item.bbox.page}",
-                        confidence=0.75,
-                    )
-                )
-
-        if tag == "insert":
-            for new_item in new_paragraphs[j1:j2]:
-                diff_items.append(
-                    DiffItem(
-                        id="",
-                        diff_type=DiffType.ADDED,
-                        old_value=None,
-                        new_value=new_item.text,
-                        old_bbox=None,
-                        new_bbox=new_item.bbox,
-                        context=f"Page {new_item.bbox.page}",
-                        confidence=0.75,
-                    )
-                )
+            )
 
     return diff_items
 
@@ -259,6 +278,8 @@ def diff_tables(old_tables: list[ParsedTable], new_tables: list[ParsedTable]) ->
                         
                         old_sub = old_cell[c_i1:c_i2] if c_i1 < c_i2 else None
                         new_sub = new_cell[c_j1:c_j2] if c_j1 < c_j2 else None
+                        if not is_meaningful_diff(old_sub, new_sub):
+                            continue
                         
                         # Use 0-based indexing to find cell bboxes
                         o_cell_bbox = old_table.cell_bboxes.get((row_index - 1, col_index - 1))
@@ -280,6 +301,9 @@ def diff_tables(old_tables: list[ParsedTable], new_tables: list[ParsedTable]) ->
                             )
                         )
                 else:
+                    if not is_meaningful_diff(old_cell, new_cell):
+                        continue
+
                     o_cell_bbox = old_table.cell_bboxes.get((row_index - 1, col_index - 1))
                     n_cell_bbox = new_table.cell_bboxes.get((row_index - 1, col_index - 1))
 

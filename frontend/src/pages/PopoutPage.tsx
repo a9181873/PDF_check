@@ -28,6 +28,10 @@ const PopoutPage: React.FC = () => {
     currentPage,
     setCurrentPage,
     openDiffPopup,
+    scale,
+    setScale,
+    grayscaleEnabled,
+    setGrayscaleEnabled,
   } = useCompareStore();
 
   const [isLoading, setIsLoading] = useState(true);
@@ -133,8 +137,10 @@ const PopoutPage: React.FC = () => {
                   file={pdfUrl}
                   currentPage={currentPage[version]}
                   onPageChange={handlePageChange}
-                  scale={1.0}
-                  grayscale
+                  scale={scale}
+                  onScaleChange={setScale}
+                  grayscale={grayscaleEnabled}
+                  onGrayscaleChange={setGrayscaleEnabled}
                   showControls={true}
                   diffItems={filteredItems}
                   onDiffClick={handleDiffClick}

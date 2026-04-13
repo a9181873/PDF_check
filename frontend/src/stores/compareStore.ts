@@ -63,6 +63,10 @@ interface CompareState {
     deleted: number;
     modified: number;
   };
+  
+  // View controls
+  scale: number;
+  setScale: (scale: number) => void;
 }
 
 export const useCompareStore = create<CompareState>()(
@@ -83,8 +87,11 @@ export const useCompareStore = create<CompareState>()(
       grayscaleEnabled: true,
       diffPopupOpen: false,
       selectedDiffForPopup: null,
+      scale: 1.0,
 
       setTaskId: (taskId) => set({ taskId }),
+
+      setScale: (scale) => set({ scale }),
 
       setStatus: (status) => set({ status }),
 

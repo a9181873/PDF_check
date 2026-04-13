@@ -88,6 +88,7 @@ const DiffOverlay: React.FC<DiffOverlayProps> = ({
         return (
           <div
             key={diff.id}
+            id={`diff-overlay-${diff.id}`}
             className={`${colorClass} cursor-pointer group pointer-events-auto ${isSelected ? 'is-selected' : ''}`}
             style={{
               position: 'absolute',

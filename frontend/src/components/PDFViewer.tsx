@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
 import { Loader2, ZoomIn, ZoomOut, RotateCw } from 'lucide-react';
 import DiffOverlay from './DiffOverlay';
@@ -58,6 +58,21 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [pageDimensions, setPageDimensions] = useState<Map<number, PageDimension>>(new Map());
   const pageContainerRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  const viewerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (selectedDiffId && viewerRef.current) {
+      // Allow a small delay to ensure DOM is updated and DiffOverlay is rendered
+      const timer = setTimeout(() => {
+        if (!viewerRef.current) return;
+        const selectedEl = viewerRef.current.querySelector('.is-selected');
+        if (selectedEl) {
+          selectedEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [selectedDiffId, numPages]);
 
   const handleDocumentLoadSuccess = ({ numPages: n }: { numPages: number }) => {
     setNumPages(n);
@@ -139,7 +154,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
         : 'empty';
 
   return (
-    <div className={`flex flex-col h-full ${className}`}>
+    <div ref={viewerRef} className={`flex flex-col h-full ${className}`}>
       {showControls && (
         <div className="flex items-center justify-between p-3 bg-gray-100 border-b border-gray-300 rounded-t-lg">
           <div className="flex items-center space-x-4">
