@@ -47,7 +47,7 @@ if not errorlevel 1 (
       set "READY=1"
       goto :health_done
     )
-    timeout /t 2 /nobreak >nul
+    ping 127.0.0.1 -n 3 >nul
   )
 )
 
@@ -60,7 +60,7 @@ if "!READY!"=="1" (
     echo 容器已啟動（本機無 curl，略過健康檢查）。
   ) else (
     echo 容器已啟動，系統仍在初始化。
-    echo 若畫面尚未出現，請稍後手動開啟。
+    echo 請稍後手動開啟。
   )
 )
 echo 前端介面: http://localhost:8000
