@@ -318,7 +318,9 @@ const ComparePage: React.FC = () => {
     return buildApiUrl(`/api/compare/${taskId}/pdf/${version}`);
   };
 
-  if (isLoading) {
+  const isProcessing = status?.status === 'pending' || status?.status === 'parsing' || status?.status === 'diffing';
+
+  if (isLoading || isProcessing) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[linear-gradient(180deg,_#f5f5f5_0%,_#eef4ef_100%)]">
         <div className="text-center">
