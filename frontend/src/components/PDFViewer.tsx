@@ -1,8 +1,8 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
-// import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
-// import 'react-pdf/dist/esm/Page/TextLayer.css';
 import { Loader2, ZoomIn, ZoomOut, RotateCw } from 'lucide-react';
+import DiffOverlay from './DiffOverlay';
+import { DiffItem } from '../services/types';
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.min.mjs',
@@ -20,104 +20,20 @@ interface PDFViewerProps {
   grayscale?: boolean;
   onGrayscaleChange?: (enabled: boolean) => void;
   className?: string;
-  children?: React.ReactNode;
   showControls?: boolean;
+  /** Diff items to overlay on each page */
+  diffItems?: DiffItem[];
+  /** Callback when a diff overlay rectangle is clicked */
+  onDiffClick?: (diff: DiffItem) => void;
 }
 
-/**
- * Renders ALL pages of a PDF in a vertical stack for continuous scrolling.
- * Uses IntersectionObserver to detect which page is currently most visible.
- */
-const PDFAllPages: React.FC<{
-  file: string | File;
-  numPages: number;
-  grayscale: boolean;
-  scale: number;
-  rotation: number;
-  onVisiblePageChange: (page: number) => void;
-  children?: React.ReactNode;
-}> = ({ file, numPages, grayscale, scale, rotation, onVisiblePageChange, children }) => {
-  const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  // Use IntersectionObserver to detect the most visible page
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        let maxRatio = 0;
-        let maxPage = 1;
-        entries.forEach((entry) => {
-          const pageNum = Number(entry.target.getAttribute('data-page'));
-          if (entry.intersectionRatio > maxRatio) {
-            maxRatio = entry.intersectionRatio;
-            maxPage = pageNum;
-          }
-        });
-        if (maxRatio > 0) {
-          onVisiblePageChange(maxPage);
-        }
-      },
-      {
-        root: null,
-        threshold: [0, 0.25, 0.5, 0.75, 1.0],
-      }
-    );
-
-    pageRefs.current.forEach((el) => observer.observe(el));
-
-    return () => observer.disconnect();
-  }, [numPages, onVisiblePageChange]);
-
-  const setPageRef = useCallback((pageNum: number, el: HTMLDivElement | null) => {
-    if (el) {
-      pageRefs.current.set(pageNum, el);
-    } else {
-      pageRefs.current.delete(pageNum);
-    }
-  }, []);
-
-  const pages = Array.from({ length: numPages }, (_, i) => i + 1);
-
-  return (
-    <div ref={containerRef} className={`${grayscale ? 'filter-grayscale' : ''}`}>
-      <Document
-        file={file}
-        loading={
-          <div className="flex items-center justify-center h-64">
-            <Loader2 className="w-6 h-6 animate-spin text-primary-600" />
-          </div>
-        }
-      >
-        {pages.map((pageNum) => (
-          <div
-            key={pageNum}
-            ref={(el) => setPageRef(pageNum, el)}
-            data-page={pageNum}
-            className="flex justify-center py-2 relative"
-          >
-            <Page
-              pageNumber={pageNum}
-              scale={scale}
-              rotate={rotation}
-              renderTextLayer
-              renderAnnotationLayer
-              className="pdf-page shadow-md"
-            />
-            {/* Page number badge */}
-            <div className="absolute top-3 right-3 bg-black/50 text-white text-xs px-2 py-0.5 rounded-full z-10">
-              {pageNum} / {numPages}
-            </div>
-          </div>
-        ))}
-      </Document>
-
-      {/* Diff overlay sits on top of the whole stack */}
-      <div className="absolute inset-0 pointer-events-none [&>*]:pointer-events-auto">
-        {children}
-      </div>
-    </div>
-  );
-};
+/** Track per-page rendered dimensions */
+interface PageDimension {
+  width: number;
+  height: number;
+  pdfWidth: number;
+  pdfHeight: number;
+}
 
 const PDFViewer: React.FC<PDFViewerProps> = ({
   file,
@@ -130,12 +46,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   grayscale = false,
   onGrayscaleChange,
   className = '',
-  children,
   showControls = true,
+  diffItems = [],
+  onDiffClick,
 }) => {
   const [numPages, setNumPages] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [pageDimensions, setPageDimensions] = useState<Map<number, PageDimension>>(new Map());
+  const pageContainerRefs = useRef<Map<number, HTMLDivElement>>(new Map());
 
   const handleDocumentLoadSuccess = ({ numPages: n }: { numPages: number }) => {
     setNumPages(n);
@@ -148,6 +67,36 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     setIsLoading(false);
     setError(`無法載入 PDF: ${loadError.message}`);
   };
+
+  /**
+   * When react-pdf finishes rendering a page, capture its actual dimensions
+   * so DiffOverlay can use correct coordinate scaling.
+   */
+  /**
+   * react-pdf Page onLoadSuccess gives us the page proxy with
+   * originalWidth / originalHeight (PDF points) and width / height (rendered px).
+   * This is the most precise way to get coordinate mapping.
+   */
+  const handlePageLoadSuccess = useCallback((pageNum: number, page: any) => {
+    const pdfWidth = page.originalWidth ?? page.width / scale;
+    const pdfHeight = page.originalHeight ?? page.height / scale;
+    const renderedWidth = page.width;
+    const renderedHeight = page.height;
+
+    setPageDimensions((prev) => {
+      const next = new Map(prev);
+      next.set(pageNum, { width: renderedWidth, height: renderedHeight, pdfWidth, pdfHeight });
+      return next;
+    });
+  }, [scale]);
+
+  const setPageContainerRef = useCallback((pageNum: number, el: HTMLDivElement | null) => {
+    if (el) {
+      pageContainerRefs.current.set(pageNum, el);
+    } else {
+      pageContainerRefs.current.delete(pageNum);
+    }
+  }, []);
 
   const handleZoomIn = () => {
     const newScale = Math.min(scale + 0.25, 3.0);
@@ -182,13 +131,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
       onPageChange?.(page);
     }
   };
-
-  const handleVisiblePageChange = useCallback(
-    (page: number) => {
-      onPageChange?.(page);
-    },
-    [onPageChange]
-  );
 
   const documentKey =
     typeof file === 'string'
@@ -309,31 +251,46 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                 loading={null}
               >
                 <div className={`${grayscale ? 'filter-grayscale' : ''}`}>
-                  {numPages && Array.from({ length: numPages }, (_, i) => i + 1).map((pageNum) => (
-                    <div
-                      key={pageNum}
-                      data-page={pageNum}
-                      className="flex justify-center py-2 relative"
-                    >
-                      <Page
-                        pageNumber={pageNum}
-                        scale={scale}
-                        rotate={rotation}
-                        renderTextLayer
-                        renderAnnotationLayer
-                        className="pdf-page shadow-md"
-                      />
-                      {/* Page number badge */}
-                      <div className="absolute top-3 right-3 bg-black/50 text-white text-xs px-2 py-0.5 rounded-full z-10">
-                        {pageNum} / {numPages}
+                  {numPages && Array.from({ length: numPages }, (_, i) => i + 1).map((pageNum) => {
+                    const dims = pageDimensions.get(pageNum);
+                    return (
+                      <div
+                        key={pageNum}
+                        ref={(el) => setPageContainerRef(pageNum, el)}
+                        data-page={pageNum}
+                        className="flex justify-center"
+                      >
+                        {/* Page + overlay wrapper: relative so overlay is scoped to this page */}
+                        <div className="relative inline-block">
+                          <Page
+                            pageNumber={pageNum}
+                            scale={scale}
+                            rotate={rotation}
+                            renderTextLayer
+                            renderAnnotationLayer
+                            className="pdf-page shadow-md"
+                            onLoadSuccess={(page) => handlePageLoadSuccess(pageNum, page)}
+                          />
+                          {/* Per-page diff overlay */}
+                          {dims && diffItems.length > 0 && (
+                            <DiffOverlay
+                              diffItems={diffItems}
+                              pageNumber={pageNum}
+                              renderedWidth={dims.width}
+                              renderedHeight={dims.height}
+                              pdfPageWidth={dims.pdfWidth}
+                              pdfPageHeight={dims.pdfHeight}
+                              onDiffClick={onDiffClick}
+                            />
+                          )}
+                          {/* Page number badge */}
+                          <div className="absolute top-3 right-3 bg-black/50 text-white text-xs px-2 py-0.5 rounded-full z-10">
+                            {pageNum} / {numPages}
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Diff overlay sits on top of the whole stack */}
-                <div className="absolute inset-0 pointer-events-none [&>*]:pointer-events-auto">
-                  {children}
+                    );
+                  })}
                 </div>
               </Document>
             )}

@@ -622,16 +622,9 @@ const ComparePage: React.FC = () => {
                         scale={1.0}
                         grayscale
                         showControls={false}
-                      >
-                        <DiffOverlay
-                          diffItems={filteredItems}
-                          currentPage={currentPage.old}
-                          canvasWidth={800}
-                          pageWidth={595}
-                          pageHeight={842}
-                          onDiffClick={handleDiffClick}
-                        />
-                      </PDFViewer>
+                        diffItems={filteredItems}
+                        onDiffClick={handleDiffClick}
+                      />
                     }
                     rightContent={
                       <PDFViewer
@@ -641,16 +634,9 @@ const ComparePage: React.FC = () => {
                         scale={1.0}
                         grayscale
                         showControls={false}
-                      >
-                        <DiffOverlay
-                          diffItems={filteredItems}
-                          currentPage={currentPage.new}
-                          canvasWidth={800}
-                          pageWidth={595}
-                          pageHeight={842}
-                          onDiffClick={handleDiffClick}
-                        />
-                      </PDFViewer>
+                        diffItems={filteredItems}
+                        onDiffClick={handleDiffClick}
+                      />
                     }
                     syncEnabled={scrollSyncEnabled}
                     onSyncToggle={setScrollSyncEnabled}

@@ -3,7 +3,6 @@ import { useParams } from 'react-router-dom';
 import { useCompareStore } from '../stores/compareStore';
 import { compareApi, buildApiUrl } from '../services/api';
 import { useCrossWindowSync } from '../hooks/useCrossWindowSync';
-import DiffOverlay from '../components/DiffOverlay';
 
 const PDFViewer = lazy(() => import('../components/PDFViewer'));
 
@@ -137,16 +136,9 @@ const PopoutPage: React.FC = () => {
                   scale={1.0}
                   grayscale
                   showControls={true}
-              >
-                  <DiffOverlay
-                    diffItems={filteredItems}
-                    currentPage={currentPage[version]}
-                    canvasWidth={800}
-                    pageWidth={595}
-                    pageHeight={842}
-                    onDiffClick={handleDiffClick}
-                  />
-              </PDFViewer>
+                  diffItems={filteredItems}
+                  onDiffClick={handleDiffClick}
+              />
             </Suspense>
           </div>
         </div>
