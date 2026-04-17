@@ -275,17 +275,20 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                         className="flex justify-center"
                       >
                         {/* Page + overlay wrapper: relative so overlay is scoped to this page */}
-                        <div className="relative inline-block">
-                          <Page
-                            pageNumber={pageNum}
-                            scale={scale}
-                            rotate={rotation}
-                            renderTextLayer={false}
-                            renderAnnotationLayer={false}
-                            className={`pdf-page shadow-md ${grayscale ? 'filter-grayscale' : ''}`}
-                            onLoadSuccess={(page) => handlePageLoadSuccess(pageNum, page)}
-                          />
-                          {/* Per-page diff overlay */}
+                        <div className="relative inline-block transition-all duration-300">
+                          {/* Grayscale applied only to PDF canvas, NOT the diff overlay */}
+                          <div className={grayscale ? 'filter-grayscale' : ''}>
+                            <Page
+                              pageNumber={pageNum}
+                              scale={scale}
+                              rotate={rotation}
+                              renderTextLayer={false}
+                              renderAnnotationLayer={false}
+                              className="pdf-page shadow-md"
+                              onLoadSuccess={(page) => handlePageLoadSuccess(pageNum, page)}
+                            />
+                          </div>
+                          {/* Per-page diff overlay — outside grayscale wrapper so colors stay vivid */}
                           {dims && diffItems.length > 0 && (
                             <DiffOverlay
                               diffItems={diffItems}

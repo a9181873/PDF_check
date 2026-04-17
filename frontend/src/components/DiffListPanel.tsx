@@ -9,19 +9,35 @@ interface DiffListPanelProps {
   className?: string;
 }
 
-const getDiffIcon = (type: DiffType) => {
-  switch (type) {
-    case DiffType.ADDED:
-      return <div className="w-3 h-3 rounded-full bg-diff-added" />;
-    case DiffType.DELETED:
-      return <div className="w-3 h-3 rounded-full bg-diff-deleted" />;
-    case DiffType.NUMBER_MODIFIED:
-      return <div className="w-3 h-3 rounded-full bg-diff-modified" />;
-    case DiffType.TEXT_MODIFIED:
-      return <div className="w-3 h-3 rounded-full bg-diff-text" />;
-    default:
-      return <div className="w-3 h-3 rounded-full bg-gray-400" />;
+const getDiffIcon = () => (
+  <div className="w-3 h-3 rounded-full bg-diff-highlight ring-1 ring-white" />
+);
+
+const getCommonPrefixLength = (a: string, b: string) => {
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  return i;
+};
+
+const getCommonSuffixLength = (a: string, b: string, prefixLen: number) => {
+  let i = 0;
+  while (i + prefixLen < a.length && i + prefixLen < b.length && a[a.length - 1 - i] === b[b.length - 1 - i]) i++;
+  return i;
+};
+
+const getTrimmedDiffText = (oldValue: string, newValue: string) => {
+  const prefixLen = getCommonPrefixLength(oldValue, newValue);
+  const suffixLen = getCommonSuffixLength(oldValue, newValue, prefixLen);
+  const trimText = (value: string) => {
+    if (prefixLen + suffixLen >= value.length) return value.trim();
+    return value.slice(prefixLen, value.length - suffixLen).trim();
+  };
+  const oldSnippet = trimText(oldValue);
+  const newSnippet = trimText(newValue);
+  if (!oldSnippet && !newSnippet) {
+    return `${oldValue} → ${newValue}`;
   }
+  return `${oldSnippet || '[刪除]'} → ${newSnippet || '[新增]'}`;
 };
 
 const getDiffLabel = (type: DiffType) => {
@@ -34,6 +50,8 @@ const getDiffLabel = (type: DiffType) => {
       return '數值修改';
     case DiffType.TEXT_MODIFIED:
       return '文字修改';
+    case DiffType.IMAGE_DIFF:
+      return '視覺差異';
     default:
       return '修改';
   }
@@ -68,7 +86,7 @@ const DiffListPanel: React.FC<DiffListPanelProps> = ({
             >
               <div className="flex items-start space-x-3">
                 <div className="flex-shrink-0 mt-1">
-                  {getDiffIcon(item.diff_type)}
+                  {getDiffIcon()}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center space-x-2 mb-1">
@@ -82,7 +100,18 @@ const DiffListPanel: React.FC<DiffListPanelProps> = ({
                       <CheckCircle className="text-green-500" size={14} />
                     )}
                   </div>
-                  
+
+                  <div className="mb-2">
+                    <div className="text-xs text-gray-500 mb-1">差異摘要</div>
+                    <p className="text-sm text-gray-800 line-clamp-2">
+                      {item.diff_type === DiffType.IMAGE_DIFF
+                        ? '視覺或排版變更，無純文字'
+                        : item.old_value && item.new_value
+                        ? getTrimmedDiffText(item.old_value, item.new_value)
+                        : item.new_value ?? item.old_value ?? item.context}
+                    </p>
+                  </div>
+
                   <div className="space-y-1">
                     {item.old_value && (
                       <div className="flex items-center">

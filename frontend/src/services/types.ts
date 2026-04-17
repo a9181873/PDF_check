@@ -3,6 +3,7 @@ export enum DiffType {
   NUMBER_MODIFIED = 'number_modified',
   ADDED = 'added',
   DELETED = 'deleted',
+  IMAGE_DIFF = 'image_diff',
 }
 
 export interface BBox {

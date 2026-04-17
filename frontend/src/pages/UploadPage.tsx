@@ -1,18 +1,58 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { isAxiosError } from 'axios';
 import { useNavigate } from 'react-router-dom';
-import { Upload, File, Folder, AlertCircle, CheckCircle, XCircle } from 'lucide-react';
-import { compareApi } from '../services/api';
+import { Upload, File, Folder, AlertCircle, CheckCircle, XCircle, Clock, ChevronRight } from 'lucide-react';
+import { compareApi, projectApi } from '../services/api';
+import { ComparisonInfo } from '../services/types';
+
+function getSuggestedProjectName(oldName: string, newName: string): string {
+  const stripExt = (n: string) => n.replace(/\.pdf$/i, '');
+  const a = stripExt(oldName);
+  const b = stripExt(newName);
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  let common = a.substring(0, i).replace(/[-_\s()（）]+$/, '').trim();
+  const today = new Date();
+  const dateStr = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
+  const timeStr = `${String(today.getHours()).padStart(2, '0')}${String(today.getMinutes()).padStart(2, '0')}${String(today.getSeconds()).padStart(2, '0')}`;
+  return common ? `${common}_核對_${dateStr}_${timeStr}` : `PDF核對_${dateStr}_${timeStr}`;
+}
 
 const UploadPage: React.FC = () => {
   const navigate = useNavigate();
   const [oldFile, setOldFile] = useState<File | null>(null);
   const [newFile, setNewFile] = useState<File | null>(null);
   const [projectId, setProjectId] = useState('');
+  const [projectIdUserEdited, setProjectIdUserEdited] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [recentComparisons, setRecentComparisons] = useState<ComparisonInfo[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+
+  useEffect(() => {
+    const fetchHistory = async () => {
+      setIsLoadingHistory(true);
+      try {
+        const history = await projectApi.listAllComparisons(5);
+        setRecentComparisons(history);
+      } catch (err) {
+        console.error('Failed to fetch history:', err);
+      } finally {
+        setIsLoadingHistory(false);
+      }
+    };
+    fetchHistory();
+  }, []);
+
+  // Auto-suggest project name when both files are selected (only if user hasn't edited)
+  useEffect(() => {
+    if (oldFile && newFile && !projectIdUserEdited) {
+      setProjectId(getSuggestedProjectName(oldFile.name, newFile.name));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [oldFile, newFile]);
 
   const validateFile = (file: File): boolean => {
     if (!file.name.toLowerCase().endsWith('.pdf')) {
@@ -192,12 +232,12 @@ const UploadPage: React.FC = () => {
               <input
                 type="text"
                 value={projectId}
-                onChange={(e) => setProjectId(e.target.value)}
-                placeholder="輸入專案 ID 或名稱，或留空使用預設專案"
+                onChange={(e) => { setProjectId(e.target.value); setProjectIdUserEdited(true); }}
+                placeholder="上傳兩個檔案後將自動帶入共通名稱+核對日期時間"
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
               />
               <p className="text-sm text-gray-500 mt-2">
-                將此次比較歸屬於特定專案，方便後續管理與查詢。
+                選取兩個檔案後自動以共通檔名＋核對日期時間建議，可手動修改。
               </p>
             </div>
 
@@ -274,6 +314,53 @@ const UploadPage: React.FC = () => {
             </div>
           </form>
         </div>
+
+        {/* History Section */}
+        {recentComparisons.length > 0 && (
+          <div className="mt-8 bg-white/95 rounded-[28px] shadow-large border border-white p-8 backdrop-blur">
+            <div className="flex items-center space-x-2 mb-6">
+              <Clock className="text-gray-400" size={24} />
+              <h2 className="text-xl font-bold text-gray-900">最近比對紀錄</h2>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {recentComparisons.map((comp) => (
+                <div
+                  key={comp.id}
+                  onClick={() => navigate(`/compare/${comp.id}`)}
+                  className="group relative flex items-center p-4 bg-gray-50 hover:bg-primary-50 rounded-2xl border border-gray-100 hover:border-primary-100 cursor-pointer transition-all hover:shadow-md"
+                >
+                  <div className="flex-1 min-w-0 pr-4">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-medium text-gray-500 bg-white px-2 py-1 rounded-md shadow-sm border border-gray-100">
+                        {new Date(comp.created_at).toLocaleDateString('zh-TW', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                      {comp.status === 'done' ? (
+                        <span className="text-xs text-green-600 font-medium">已完成</span>
+                      ) : comp.status === 'error' ? (
+                        <span className="text-xs text-red-600 font-medium">錯誤</span>
+                      ) : (
+                        <span className="text-xs text-blue-600 font-medium animate-pulse">處理中</span>
+                      )}
+                    </div>
+                    <div className="mt-2 space-y-1">
+                      <div className="flex items-start space-x-2">
+                        <span className="text-xs text-gray-400 mt-0.5">舊:</span>
+                        <p className="text-sm text-gray-700 truncate font-medium">{comp.old_filename}</p>
+                      </div>
+                      <div className="flex items-start space-x-2">
+                        <span className="text-xs text-gray-400 mt-0.5">新:</span>
+                        <p className="text-sm text-gray-700 truncate font-medium">{comp.new_filename}</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center text-gray-400 group-hover:text-primary-600 group-hover:translate-x-1 transition-all shadow-sm">
+                    <ChevronRight size={18} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Features grid */}
         <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6">

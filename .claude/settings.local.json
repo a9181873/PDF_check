@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker exec pdf-check-backend python3 -c ' *)",
+      "Bash(netstat -ano)",
+      "Bash(docker exec *)"
+    ]
+  }
+}

@@ -46,6 +46,33 @@ const getDiffColor = (type: DiffType) => {
   }
 };
 
+const getCommonPrefixLength = (a: string, b: string) => {
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  return i;
+};
+
+const getCommonSuffixLength = (a: string, b: string, prefixLen: number) => {
+  let i = 0;
+  while (i + prefixLen < a.length && i + prefixLen < b.length && a[a.length - 1 - i] === b[b.length - 1 - i]) i++;
+  return i;
+};
+
+const getTrimmedDiffText = (oldValue: string, newValue: string) => {
+  const prefixLen = getCommonPrefixLength(oldValue, newValue);
+  const suffixLen = getCommonSuffixLength(oldValue, newValue, prefixLen);
+  const trimText = (value: string) => {
+    if (prefixLen + suffixLen >= value.length) return value.trim();
+    return value.slice(prefixLen, value.length - suffixLen).trim();
+  };
+  const oldSnippet = trimText(oldValue);
+  const newSnippet = trimText(newValue);
+  if (!oldSnippet && !newSnippet) {
+    return `${oldValue} → ${newValue}`;
+  }
+  return `${oldSnippet || '[刪除]'} → ${newSnippet || '[新增]'}`;
+};
+
 const DiffPopupInner: React.FC<DiffPopupInnerProps> = ({
   diff,
   onClose,
@@ -96,6 +123,23 @@ const DiffPopupInner: React.FC<DiffPopupInnerProps> = ({
 
       <div className="p-6">
         <div className="mb-6">
+          <h4 className="text-sm font-medium text-gray-500 mb-2">差異摘要</h4>
+          <div
+            className="rounded-2xl p-4 mb-4"
+            style={{
+              backgroundColor: 'rgba(255, 246, 190, 0.16)',
+              border: '1px solid rgba(255, 221, 120, 0.50)',
+            }}
+          >
+            <p className="text-sm text-gray-900 whitespace-pre-wrap break-words">
+              {diff.diff_type === DiffType.IMAGE_DIFF
+                ? '此範圍內偵測到視覺或排版變更（例如：圖片內容、表格外框、或文字位置移動），故無提取對應的純文字。'
+                : diff.old_value && diff.new_value
+                ? getTrimmedDiffText(diff.old_value, diff.new_value)
+                : diff.new_value ?? diff.old_value ?? diff.context}
+            </p>
+          </div>
+
           <h4 className="text-sm font-medium text-gray-500 mb-2">位置</h4>
           <div className="flex items-center space-x-2">
             <ExternalLink size={16} className="text-gray-400" />
@@ -129,7 +173,9 @@ const DiffPopupInner: React.FC<DiffPopupInnerProps> = ({
                   {diff.old_value}
                 </pre>
               ) : (
-                <p className="text-sm text-gray-500 italic">無原始內容</p>
+                <p className="text-sm text-gray-500 italic">
+                  {diff.diff_type === DiffType.IMAGE_DIFF ? '無原始文字（純視覺差異）' : '無原始內容'}
+                </p>
               )}
             </div>
           </div>
@@ -154,7 +200,9 @@ const DiffPopupInner: React.FC<DiffPopupInnerProps> = ({
                   {diff.new_value}
                 </pre>
               ) : (
-                <p className="text-sm text-gray-500 italic">無修訂內容</p>
+                <p className="text-sm text-gray-500 italic">
+                  {diff.diff_type === DiffType.IMAGE_DIFF ? '無修訂文字（純視覺差異）' : '無修訂內容'}
+                </p>
               )}
             </div>
           </div>

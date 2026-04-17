@@ -40,6 +40,7 @@ class ParsedDocument:
     tables: list[ParsedTable]
     raw_json: dict
     markdown_text: str | None = None
+    is_image_pdf: bool = False
 
 
 def _to_bottom_left_bbox(page_number: int, page_height: float, block_bbox: list[float]) -> BBox:
@@ -89,14 +90,17 @@ def _get_docling_converter():
     from docling.datamodel.pipeline_options import PdfPipelineOptions, TesseractCliOcrOptions
     from docling.document_converter import DocumentConverter, PdfFormatOption
 
-    lang_env = os.getenv("OCR_LANGS", "eng")
+    lang_env = os.getenv("OCR_LANGS", "chi_tra+chi_sim+eng")
     langs = [lang.strip() for lang in lang_env.split(",") if lang.strip()]
 
     options = PdfPipelineOptions()
+    # do_ocr=True but force_full_page_ocr=False: only OCR truly image-based pages.
+    # For PDFs with embedded text (like insurance DMs), the text layer is used directly,
+    # which avoids OCR-induced false positives from Tesseract misreads.
     options.do_ocr = True
     options.ocr_options = TesseractCliOcrOptions(
-        lang=langs or ["eng"],
-        force_full_page_ocr=True,
+        lang=langs or ["chi_tra", "chi_sim", "eng"],
+        force_full_page_ocr=False,
     )
 
     return DocumentConverter(
@@ -237,35 +241,43 @@ def _parse_via_fitz(pdf_path: Path) -> ParsedDocument:
 
     paragraphs: list[ParsedParagraph] = []
     raw_pages: list[dict] = []
+    total_chars = 0
+    total_images = 0
 
     with fitz.open(pdf_path) as doc:
         for page_index, page in enumerate(doc, start=1):
             page_dict = page.get_text("dict")
             raw_pages.append(page_dict)
             page_height = float(page.rect.height)
+            total_images += len(page.get_images())
 
             for block in page_dict.get("blocks", []):
                 if block.get("type") != 0:
                     continue
 
                 lines = block.get("lines", [])
-                parts: list[str] = []
                 for line in lines:
+                    parts: list[str] = []
                     for span in line.get("spans", []):
                         text = str(span.get("text", "")).strip()
                         if text:
                             parts.append(text)
 
-                joined = " ".join(parts).strip()
-                if not joined:
-                    continue
+                    joined = " ".join(parts).strip()
+                    if not joined:
+                        continue
 
-                paragraph_bbox = _to_bottom_left_bbox(
-                    page_number=page_index,
-                    page_height=page_height,
-                    block_bbox=block.get("bbox", [0, 0, 0, 0]),
-                )
-                paragraphs.append(ParsedParagraph(text=joined, bbox=paragraph_bbox))
+                    total_chars += len(joined)
+                    line_bbox = _to_bottom_left_bbox(
+                        page_number=page_index,
+                        page_height=page_height,
+                        block_bbox=line.get("bbox", [0, 0, 0, 0]),
+                    )
+                    paragraphs.append(ParsedParagraph(text=joined, bbox=line_bbox))
+
+        # Image-only PDF: no meaningful text layer, every page is a raster image.
+        # Tag this so the diff engine can switch to pixel-level comparison.
+        is_image_pdf = total_chars < 20 and total_images > 0
 
         markdown_lines = [paragraph.text for paragraph in paragraphs]
         markdown = "\n\n".join(markdown_lines)
@@ -273,8 +285,9 @@ def _parse_via_fitz(pdf_path: Path) -> ParsedDocument:
             pages=len(doc),
             paragraphs=paragraphs,
             tables=[],
-            raw_json={"engine": "pymupdf", "pages": raw_pages},
+            raw_json={"engine": "pymupdf", "pages": raw_pages, "is_image_pdf": is_image_pdf},
             markdown_text=markdown or None,
+            is_image_pdf=is_image_pdf,
         )
 
 
@@ -358,19 +371,42 @@ def parse_pdf(file_path: str) -> ParsedDocument:
 
     errors: list[str] = []
 
+    # PyMuPDF (fitz) reads the embedded text layer directly — no OCR, no misreads.
+    # For image-only PDFs (no text layer) it returns is_image_pdf=True so the diff
+    # engine can switch to pixel-level comparison instead of noisy OCR text diff.
+    try:
+        doc = _parse_via_fitz(pdf_path)
+        if doc.is_image_pdf:
+            # Pure image PDF: return immediately, pixel diff handles it.
+            # Do NOT fall through to docling OCR — OCR noise causes false positives.
+            return doc
+        if doc.paragraphs:
+            # Text-layer PDF: augment with docling table detection.
+            try:
+                docling_doc = _parse_via_docling(pdf_path)
+                if docling_doc.tables:
+                    doc = ParsedDocument(
+                        pages=doc.pages,
+                        paragraphs=doc.paragraphs,
+                        tables=docling_doc.tables,
+                        raw_json=doc.raw_json,
+                        markdown_text=doc.markdown_text,
+                        is_image_pdf=False,
+                    )
+            except Exception:
+                pass  # tables are optional; fitz paragraphs are primary
+            return doc
+    except ModuleNotFoundError as exc:
+        errors.append(f"pymupdf unavailable: {exc}")
+    except Exception as exc:  # pragma: no cover
+        errors.append(f"pymupdf failed: {exc}")
+
     try:
         return _parse_via_docling(pdf_path)
     except ModuleNotFoundError as exc:
         errors.append(f"docling unavailable: {exc}")
-    except Exception as exc:  # pragma: no cover - parser runtime errors
+    except Exception as exc:  # pragma: no cover
         errors.append(f"docling failed: {exc}")
-
-    try:
-        return _parse_via_fitz(pdf_path)
-    except ModuleNotFoundError as exc:
-        errors.append(f"pymupdf unavailable: {exc}")
-    except Exception as exc:  # pragma: no cover - parser runtime errors
-        errors.append(f"pymupdf failed: {exc}")
 
     try:
         doc = _parse_via_pdftotext(pdf_path)
@@ -379,14 +415,14 @@ def parse_pdf(file_path: str) -> ParsedDocument:
         errors.append("pdftotext extracted no text")
     except FileNotFoundError as exc:
         errors.append(f"pdftotext binary missing: {exc}")
-    except Exception as exc:  # pragma: no cover - parser runtime errors
+    except Exception as exc:  # pragma: no cover
         errors.append(f"pdftotext failed: {exc}")
 
     try:
         return _parse_via_ocr(pdf_path)
     except FileNotFoundError as exc:
         errors.append(f"ocr dependencies missing: {exc}")
-    except Exception as exc:  # pragma: no cover - parser runtime errors
+    except Exception as exc:  # pragma: no cover
         errors.append(f"ocr failed: {exc}")
 
     detail = " | ".join(errors) if errors else "unknown parser error"

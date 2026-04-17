@@ -8,6 +8,7 @@ class DiffType(str, Enum):
     NUMBER_MODIFIED = "number_modified"
     ADDED = "added"
     DELETED = "deleted"
+    IMAGE_DIFF = "image_diff"
 
 
 class BBox(BaseModel):

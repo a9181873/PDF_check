@@ -37,8 +37,19 @@ def _report_date_tag(created_at: str) -> str:
     return created_at.split("T", 1)[0].replace("-", "")
 
 
-def _download_name(prefix: str, comparison_id: str, created_at: str, extension: str) -> str:
-    return f"{prefix}_{comparison_id}_{_report_date_tag(created_at)}.{extension}"
+def _generate_filename(prefix: str, report, extension: str) -> str:
+    import os
+    from datetime import datetime
+    
+    old_base = Path(report.old_filename).stem if getattr(report, "old_filename", None) else ""
+    new_base = Path(report.new_filename).stem if getattr(report, "new_filename", None) else ""
+    
+    common = os.path.commonprefix([old_base, new_base]).strip(" _-")
+    if not common:
+        common = report.project_id if getattr(report, "project_id", None) else "Unnamed"
+        
+    audit_date = datetime.now().strftime("%Y%m%d")
+    return f"{common}_{prefix}_{audit_date}.{extension}"
 
 
 @router.get("/{comparison_id}/pdf")
@@ -51,7 +62,8 @@ async def export_pdf(comparison_id: str):
     if not source_pdf:
         raise HTTPException(status_code=404, detail="Source PDF not found")
 
-    output = settings.export_dir / f"{comparison_id}_annotated.pdf"
+    filename = _generate_filename("差異標註版", report, "pdf")
+    output = settings.export_dir / filename
     try:
         exported = export_annotated_pdf(str(source_pdf), report.items, str(output))
     except RuntimeError as exc:
@@ -59,7 +71,7 @@ async def export_pdf(comparison_id: str):
     return FileResponse(
         exported,
         media_type="application/pdf",
-        filename=_download_name("差異標註版", comparison_id, report.created_at, "pdf"),
+        filename=filename,
     )
 
 
@@ -71,7 +83,8 @@ async def export_excel(comparison_id: str):
 
     checklist = get_checklist(comparison_id)
     review_counts = get_review_counts(comparison_id)
-    output = settings.export_dir / f"{comparison_id}_review.xlsx"
+    filename = _generate_filename("差異檢核明細", report, "xlsx")
+    output = settings.export_dir / filename
     exported = export_review_excel(
         comparison_id,
         report,
@@ -83,7 +96,7 @@ async def export_excel(comparison_id: str):
     return FileResponse(
         exported,
         media_type=media,
-        filename=_download_name("差異檢核明細", comparison_id, report.created_at, "xlsx"),
+        filename=filename,
     )
 
 
@@ -95,7 +108,8 @@ async def export_report(comparison_id: str):
 
     checklist = get_checklist(comparison_id)
     review_counts = get_review_counts(comparison_id)
-    output = settings.export_dir / f"{comparison_id}_report.pdf"
+    filename = _generate_filename("差異檢核報告", report, "pdf")
+    output = settings.export_dir / filename
     try:
         exported = export_review_report_pdf(
             comparison_id,
@@ -109,7 +123,7 @@ async def export_report(comparison_id: str):
     return FileResponse(
         exported,
         media_type="application/pdf",
-        filename=_download_name("差異檢核報告", comparison_id, report.created_at, "pdf"),
+        filename=filename,
     )
 
 
@@ -122,7 +136,8 @@ async def export_log(comparison_id: str):
     checklist = get_checklist(comparison_id)
     review_counts = get_review_counts(comparison_id)
     review_logs = get_review_logs(comparison_id)
-    output = settings.export_dir / f"{comparison_id}_log.json"
+    filename = _generate_filename("完整審核Log", report, "json")
+    output = settings.export_dir / filename
     exported = export_review_log_json(
         comparison_id,
         report,
@@ -134,7 +149,7 @@ async def export_log(comparison_id: str):
     return FileResponse(
         exported,
         media_type="application/json",
-        filename=_download_name("完整審核Log", comparison_id, report.created_at, "json"),
+        filename=filename,
     )
 
 
@@ -146,7 +161,8 @@ async def export_log_csv(comparison_id: str):
 
     checklist = get_checklist(comparison_id)
     review_logs = get_review_logs(comparison_id)
-    output = settings.export_dir / f"{comparison_id}_log.csv"
+    filename = _generate_filename("審核Log", report, "csv")
+    output = settings.export_dir / filename
     exported = export_review_log_csv(
         comparison_id,
         report,
@@ -157,5 +173,5 @@ async def export_log_csv(comparison_id: str):
     return FileResponse(
         exported,
         media_type="text/csv; charset=utf-8",
-        filename=_download_name("審核Log", comparison_id, report.created_at, "csv"),
+        filename=filename,
     )

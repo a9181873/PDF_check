@@ -19,6 +19,11 @@ async def list_projects_api():
     return [ProjectResponse(**row) for row in rows]
 
 
+@router.get("/all/comparisons")
+async def list_all_projects_comparisons_api(limit: int = 10):
+    from models.database import list_all_comparisons
+    return list_all_comparisons(limit)
+
 @router.get("/{project_id}/comparisons")
 async def list_project_comparisons_api(project_id: str):
     if not project_exists(project_id):

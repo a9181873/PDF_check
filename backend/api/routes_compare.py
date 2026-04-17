@@ -1,9 +1,11 @@
+import io
 import shutil
 import uuid
+import zipfile
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from api.task_store import TASK_STORE
 from config import settings
@@ -13,10 +15,12 @@ from models.database import (
     get_comparison,
     get_markdown_paths as db_get_markdown_paths,
     get_comparison_report,
+    get_snapshot_dir,
     project_exists,
     save_comparison_error,
     save_diff_report,
     save_markdown_paths,
+    save_snapshot_dir,
     update_comparison_status,
 )
 from models.schemas import CompareStatusResponse, UploadResponse
@@ -99,10 +103,33 @@ def _run_compare_task(
             new_filename=new_name,
             old_doc=old_doc,
             new_doc=new_doc,
+            old_pdf_path=old_path,
+            new_pdf_path=new_path,
         )
-        report.summary = f"parser_old={old_doc_engine}, parser_new={new_doc.raw_json.get('engine', 'unknown')}"
+        if not report.summary:
+            report.summary = f"parser_old={old_doc_engine}, parser_new={new_doc.raw_json.get('engine', 'unknown')}"
 
         save_diff_report(task_id, report)
+
+        _set_task_progress(task_id, "snapshotting", 90, "saving snapshots")
+        try:
+            from services.snapshot_service import generate_comparison_snapshots
+            settings.snapshots_dir.mkdir(parents=True, exist_ok=True)
+            snap_dir = generate_comparison_snapshots(
+                task_id=task_id,
+                old_pdf_path=old_path,
+                new_pdf_path=new_path,
+                report=report,
+                snapshot_base_dir=settings.snapshots_dir,
+            )
+            save_snapshot_dir(task_id, str(snap_dir))
+        except Exception as exc:
+            # Snapshots are optional — never block the comparison result, but log
+            # so failures are visible in audit logs rather than silently missing.
+            import logging
+            logging.getLogger(__name__).warning(
+                "Snapshot generation failed for task %s: %s", task_id, exc
+            )
 
         def updater(state):
             state.status = "done"
@@ -262,6 +289,90 @@ async def download_markdown(task_id: str, version: str):
     source_name = row["old_filename"] if normalized == "old" else row["new_filename"]
     download_name = f"{Path(source_name).stem}_{normalized}.md"
     return FileResponse(path_obj, media_type="text/markdown; charset=utf-8", filename=download_name)
+
+
+@router.get("/{task_id}/snapshots")
+async def list_snapshots(task_id: str):
+    """List available snapshot files for a comparison."""
+    row = get_comparison(task_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    snap_dir_str = get_snapshot_dir(task_id)
+    if not snap_dir_str:
+        raise HTTPException(status_code=404, detail="Snapshots not yet generated")
+
+    snap_dir = Path(snap_dir_str)
+    if not snap_dir.exists():
+        raise HTTPException(status_code=404, detail="Snapshot directory missing")
+
+    files = sorted(snap_dir.iterdir(), key=lambda p: p.name)
+    return {
+        "task_id": task_id,
+        "snapshot_dir": str(snap_dir),
+        "files": [
+            {
+                "name": f.name,
+                "size_bytes": f.stat().st_size,
+                "download_url": f"/api/compare/{task_id}/snapshots/{f.name}",
+            }
+            for f in files
+            if f.is_file()
+        ],
+        "download_zip_url": f"/api/compare/{task_id}/snapshots/download.zip",
+    }
+
+
+@router.get("/{task_id}/snapshots/download.zip")
+async def download_snapshots_zip(task_id: str):
+    """Download all snapshot files as a ZIP archive."""
+    row = get_comparison(task_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    snap_dir_str = get_snapshot_dir(task_id)
+    if not snap_dir_str:
+        raise HTTPException(status_code=404, detail="Snapshots not yet generated")
+
+    snap_dir = Path(snap_dir_str)
+    if not snap_dir.exists():
+        raise HTTPException(status_code=404, detail="Snapshot directory missing")
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for f in sorted(snap_dir.iterdir()):
+            if f.is_file():
+                zf.write(f, arcname=f.name)
+    buf.seek(0)
+
+    zip_name = f"snapshot_{task_id[:8]}.zip"
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{zip_name}"'},
+    )
+
+
+@router.get("/{task_id}/snapshots/{filename}")
+async def download_snapshot_file(task_id: str, filename: str):
+    """Download a single snapshot file (PNG or JSON)."""
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    row = get_comparison(task_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    snap_dir_str = get_snapshot_dir(task_id)
+    if not snap_dir_str:
+        raise HTTPException(status_code=404, detail="Snapshots not yet generated")
+
+    file_path = Path(snap_dir_str) / filename
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Snapshot file not found")
+
+    media_type = "image/png" if filename.endswith(".png") else "application/json"
+    return FileResponse(file_path, media_type=media_type, filename=filename)
 
 
 @router.get("/{task_id}/pdf/{version}")

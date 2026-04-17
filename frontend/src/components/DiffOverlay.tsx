@@ -17,19 +17,8 @@ interface DiffOverlayProps {
   onDiffClick?: (diff: DiffItem) => void;
 }
 
-const getDiffColor = (type: DiffType) => {
-  switch (type) {
-    case DiffType.ADDED:
-      return 'diff-overlay-added';
-    case DiffType.DELETED:
-      return 'diff-overlay-deleted';
-    case DiffType.NUMBER_MODIFIED:
-      return 'diff-overlay-modified';
-    case DiffType.TEXT_MODIFIED:
-      return 'diff-overlay-text';
-    default:
-      return 'diff-overlay-text';
-  }
+const getDiffColor = (_type: DiffType) => {
+  return 'diff-overlay-highlight';
 };
 
 const getDiffLabel = (type: DiffType) => {
@@ -42,9 +31,38 @@ const getDiffLabel = (type: DiffType) => {
       return '數值修改';
     case DiffType.TEXT_MODIFIED:
       return '文字修改';
+    case DiffType.IMAGE_DIFF:
+      return '視覺差異';
     default:
       return '修改';
   }
+};
+
+const getCommonPrefixLength = (a: string, b: string) => {
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  return i;
+};
+
+const getCommonSuffixLength = (a: string, b: string, prefixLen: number) => {
+  let i = 0;
+  while (i + prefixLen < a.length && i + prefixLen < b.length && a[a.length - 1 - i] === b[b.length - 1 - i]) i++;
+  return i;
+};
+
+const getTrimmedDiffText = (oldValue: string, newValue: string) => {
+  const prefixLen = getCommonPrefixLength(oldValue, newValue);
+  const suffixLen = getCommonSuffixLength(oldValue, newValue, prefixLen);
+  const trimText = (value: string) => {
+    if (prefixLen + suffixLen >= value.length) return value.trim();
+    return value.slice(prefixLen, value.length - suffixLen).trim();
+  };
+  const oldSnippet = trimText(oldValue);
+  const newSnippet = trimText(newValue);
+  if (!oldSnippet && !newSnippet) {
+    return `${oldValue} → ${newValue}`;
+  }
+  return `${oldSnippet || '[刪除]'} → ${newSnippet || '[新增]'}`;
 };
 
 const DiffOverlay: React.FC<DiffOverlayProps> = ({
@@ -85,6 +103,11 @@ const DiffOverlay: React.FC<DiffOverlayProps> = ({
         const label = getDiffLabel(diff.diff_type);
         const isSelected = selectedDiffId === diff.id;
 
+        const titleText =
+          diff.diff_type === DiffType.IMAGE_DIFF
+            ? `${label} - ${diff.context || ''}`.trim()
+            : `${label}: ${diff.old_value && diff.new_value ? getTrimmedDiffText(diff.old_value, diff.new_value) : `${diff.old_value || ''} → ${diff.new_value || ''}`}`;
+
         return (
           <div
             key={diff.id}
@@ -98,8 +121,13 @@ const DiffOverlay: React.FC<DiffOverlayProps> = ({
               height: `${Math.max(height, 4)}px`,
             }}
             onClick={() => onDiffClick?.(diff)}
-            title={`${label}: ${diff.old_value || ''} → ${diff.new_value || ''}`}
+            title={titleText}
           >
+            <div className="absolute inset-x-0 top-0 pointer-events-none px-1 pt-1">
+              <div className="bg-white/90 text-[10px] text-gray-900 rounded-full px-1.5 py-0.5 shadow-sm max-w-full overflow-hidden text-ellipsis whitespace-nowrap">
+                {titleText}
+              </div>
+            </div>
             {/* Tooltip on hover */}
             <div className="absolute -top-8 left-1/2 transform -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-20">
               <div className="bg-gray-900 text-white text-xs py-1 px-2 rounded whitespace-nowrap max-w-[200px] truncate">

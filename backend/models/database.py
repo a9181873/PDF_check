@@ -83,6 +83,7 @@ def init_db() -> None:
         _ensure_column(conn, "comparisons", "error_message", "TEXT")
         _ensure_column(conn, "comparisons", "old_markdown_path", "TEXT")
         _ensure_column(conn, "comparisons", "new_markdown_path", "TEXT")
+        _ensure_column(conn, "comparisons", "snapshot_dir", "TEXT")
 
 
 def create_project(name: str) -> dict[str, str]:
@@ -278,6 +279,22 @@ def list_project_comparisons(project_id: str) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def list_all_comparisons(limit: int = 10) -> list[dict]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, project_id, old_filename, new_filename, status,
+                   created_at, completed_at, error_message,
+                   old_markdown_path, new_markdown_path
+            FROM comparisons
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def add_review_log(
     comparison_id: str,
     diff_item_id: str,
@@ -386,3 +403,22 @@ def get_checklist(comparison_id: str) -> list[ChecklistItem]:
         return []
     payload = json.loads(row["items_json"])
     return [ChecklistItem.model_validate(item) for item in payload]
+
+
+def save_snapshot_dir(comparison_id: str, snapshot_dir: str) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE comparisons SET snapshot_dir = ? WHERE id = ?",
+            (snapshot_dir, comparison_id),
+        )
+
+
+def get_snapshot_dir(comparison_id: str) -> str | None:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT snapshot_dir FROM comparisons WHERE id = ?",
+            (comparison_id,),
+        ).fetchone()
+    if not row:
+        return None
+    return row["snapshot_dir"]

@@ -104,6 +104,12 @@ export const projectApi = {
     const response = await api.get(`/api/projects/${projectId}/comparisons`);
     return response.data;
   },
+
+  // List all recent comparisons globally
+  async listAllComparisons(limit: number = 10): Promise<ComparisonInfo[]> {
+    const response = await api.get(`/api/projects/all/comparisons`, { params: { limit } });
+    return response.data;
+  },
 };
 
 export const reviewApi = {
