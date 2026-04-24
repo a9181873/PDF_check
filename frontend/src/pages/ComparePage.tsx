@@ -338,7 +338,7 @@ const ComparePage: React.FC = () => {
     }
   };
 
-  const handleExportDownload = (format: 'report' | 'excel' | 'pdf' | 'log' | 'log-csv') => {
+  const handleExportDownload = (format: 'report' | 'excel' | 'pdf' | 'log' | 'log-csv' | 'log-txt') => {
     if (!taskId) {
       return;
     }
