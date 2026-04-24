@@ -87,7 +87,9 @@ Persistence
 - 前端 route-level 與 component-level code-splitting
 - **帳號密碼管理機制** — JWT 認證、登入頁面、帳號管理頁面、審核自動帶入帳號
 - **響應式 DiffPopup** — 內容修改框依瀏覽器解析度自適應，底部按鈕永遠可見
-- **像素差異 + 文字交叉驗證** — 降低肉眼看起來一致卻被標記的誤判
+- **四路聯集比對引擎** — 整合文字、表格、像素、嵌入圖片 (pHash) 的全方位比對
+- **零漏報優化 (Zero-Miss Tuning)** — 調降像素門檻 (15) 與面積 (200 px)，提高 NCC (0.98) 嚴格度，確保人為修改無所遁形
+- **專案設定審核人員** — 在上傳頁面即時顯示當前審核者，並記錄至審核日誌中
 
 ### 目前限制
 
@@ -259,7 +261,9 @@ Docling 解析時會啟用 OCR，語言來自 `OCR_LANGS`，預設為 `eng`，Do
 - 透過 regex 判斷是否含數值，分成 `number_modified` 與 `text_modified`
 - `insert/delete` 轉成 `added/deleted`
 - 表格會以 DataFrame 欄列內容做逐格比較，並先以整張表 bbox 回報位置
+- **嵌入圖片比對**：利用 PyMuPDF 提取圖片並計算 pHash (感知哈希)，偵測圖片替換、尺寸變更或內容微調
 - 最後依頁碼與座標排序並編成 `d001`, `d002`, ...
+- **聯集策略**：文字 diff + 表格 diff + 像素 diff + 圖片 diff 取聯集，確保無遺漏任何變更
 
 ### 4. 前端渲染
 

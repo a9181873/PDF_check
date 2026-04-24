@@ -91,40 +91,44 @@ Client                         Server
 
 ## 3. 差異引擎架構
 
-### 3.1 三層比對策略
+### 3.1 四路聯集比對策略
 
 ```mermaid
 graph TD
     A[PDF 上傳] --> B{有文字層?}
     B -->|是| C[Docling / PyMuPDF 解析]
-    B -->|否| D[像素級比對]
+    B -->|否| D[像素 + 圖片比對]
     C --> E[段落 diff<br/>SequenceMatcher]
     C --> F[表格 diff<br/>cell-level]
     C --> G[像素 diff<br/>補充驗證]
-    E --> H{文字+圖片交叉驗證}
-    G --> H
-    H -->|文字一致| I[抑制誤判]
-    H -->|文字不同| J[標記差異]
-    D --> J
-    F --> J
-    J --> K[合併排序<br/>d001, d002...]
+    C --> H[嵌入圖片 diff<br/>pHash]
+    E --> I{文字+像素交叉驗證}
+    G --> I
+    I -->|文字一致| J[抑制渲染噪音]
+    I -->|文字不同| K[標記差異]
+    D --> K
+    F --> K
+    H --> K
+    K --> L[合併排序<br/>d001, d002...]
 ```
 
 ### 3.2 誤判抑制機制 (2026-04-24 更新)
 
 | 過濾器 | 說明 | 閾值 |
 |--------|------|------|
-| NCC 結構相似度 | 像素區域的正規化交叉相關 | > 0.96 抑制 |
-| 文字模糊匹配 | 像素區域內的文字 SequenceMatcher 比率 | ≥ 0.80 抑制 |
-| 最小面積 | 變更像素數量 | < 800 px 忽略 |
-| 噪點比率 | 實際變更像素 / 區域總像素 | < 5% 忽略 |
+| 像素門檻 | 偵測亮度差異門檻 (0-255) | 15 (原 30) |
+| NCC 結構相似度 | 像素區域的正規化交叉相關 | > 0.98 抑制 |
+| 文字模糊匹配 | 像素區域內的文字 SequenceMatcher 比率 | ≥ 0.95 抑制 |
+| 最小面積 | 變更像素數量 | < 200 px 忽略 (原 800) |
+| 噪點比率 | 實際變更像素 / 區域總像素 | < 2% 忽略 (原 5%) |
+| DPI | 渲染解析度 | 200 (原 150) |
 | 深度正規化 | NFKC + 去除零寬字元 + 統一空格/破折號 | — |
 
-### 3.3 always-on pixel diff
+### 3.3 嵌入圖片與像素比對
 
-- 文字 PDF 現在也會同時執行像素比對作為補充
-- 每個像素差異區域都會做文字交叉驗證
-- 兩側文字相同 → 渲染噪音，自動抑制
+- **像素比對**: 文字 PDF 也會執行像素比對，門檻調降至 15 以捕捉細微變更（如標點、線條）。
+- **嵌入圖片比對**: 使用 `imagehash` 提取 PDF 內部原始圖檔並比對 pHash，漢明距離 > 0 視為變更。
+- **交叉驗證**: 兩側文字 95% 以上一致時，自動抑制像素差異，避免 PDF 重新輸出時的渲染噪音。
 
 ## 4. 前端架構
 
@@ -289,7 +293,7 @@ Docker Container (pdf-system)
 | HTTPS | 未啟用 | Docker 內網不需要 |
 | 預設帳號 | admin/admin123 | **首次登入後應修改密碼** |
 
-## 10. 本次更新變更清單
+## 10. 本次更新變更清單 (2026-04-24)
 
 ### 前端
 
@@ -297,22 +301,18 @@ Docker Container (pdf-system)
 |------|------|------|
 | `App.tsx` | 修改 | 新增 ProtectedRoute、login/admin 路由 |
 | `DiffPopup.tsx` | 修改 | 響應式佈局 + 自動帶入審核帳號 |
-| `UploadPage.tsx` | 修改 | 搜尋框 + 列表呈現 + 匯出按鈕 |
+| `UploadPage.tsx` | 修改 | 搜尋框 + 列表呈現 + 審核人員顯示 |
 | `ComparePage.tsx` | 修改 | 使用者資訊 + 登出 + TXT 匯出選項 |
 | `LoginPage.tsx` | 新增 | 登入頁面 |
 | `AdminPage.tsx` | 新增 | 帳號管理頁面 |
-| `authApi.ts` | 新增 | 認證 API + Token 管理 |
-| `authStore.ts` | 新增 | 認證狀態 (zustand) |
 
 ### 後端
 
 | 檔案 | 動作 | 說明 |
 |------|------|------|
-| `routes_auth.py` | 新增 | 認證 API (login / users CRUD) |
+| `diff_service.py` | 修改 | **Diff 引擎大改**：新增 pHash 圖片比對、調降門檻 (15)、面積 (200)、提高 NCC (0.98) |
 | `resource_monitor.py` | 新增 | CPU/RAM 監控 + 持久化 |
-| `routes_export.py` | 修改 | 新增 log-txt 端點 |
-| `routes_compare.py` | 修改 | 整合 ResourceMonitor |
-| `export_service.py` | 修改 | 新增 export_review_log_txt() |
-| `database.py` | 修改 | users + resource_logs 資料表 |
-| `diff_service.py` | 修改 | 調降 NCC/文字閾值 + always-on pixel diff |
-| `main.py` | 修改 | 註冊 auth router + 資源監控 API |
+| `routes_auth.py` | 新增 | 認證 API (login / users CRUD) |
+| `export_service.py` | 修改 | 新增 TXT 審核日誌匯出 |
+| `database.py` | 修改 | users + resource_logs + 頁面記錄支援 |
+| `requirements.txt` | 修改 | 新增 `imagehash` 套件 |
