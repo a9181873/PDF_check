@@ -577,10 +577,17 @@ def diff_pixels(
                 # IMPORTANT: Large regions (tables, complex layouts) should NOT
                 # be OCR'd — Tesseract produces garbage on structured tables.
                 # Instead, report them as visual diffs with screenshots only.
-                patch_area = (r1 - r0) * (c1 - c0)
-                is_large_region = patch_area > 8000  # ~roughly 80×100 px or larger
+                patch_w = c1 - c0
+                patch_h = r1 - r0
+                patch_area = patch_w * patch_h
+                # Require both width and height > 40px to prevent flagging thin grid lines as large regions
+                is_large_region = patch_area > 8000 and patch_w > 40 and patch_h > 40
 
-                if not ot and not nt and not is_large_region:
+                # If there's no native text AND it's just a thin graphic line, it's rendering noise
+                if not ot and not nt and (patch_h < 20 or patch_w < 20):
+                    continue
+
+                if not ot and not nt:
                     try:
                         import subprocess, tempfile, os as _os
                         from PIL import Image as _PILImage, ImageFilter as _PILFilter
@@ -602,7 +609,7 @@ def diff_pixels(
                                     (pil_img.width * scale, pil_img.height * scale),
                                     _PILImage.LANCZOS,
                                 )
-                            # Otsu-style binarization: convert to pure black/white
+                            # Otsu-style binarization
                             pil_arr = np.array(pil_img)
                             thresh = int(pil_arr.mean()) - 20
                             thresh = max(80, min(thresh, 200))
@@ -641,18 +648,6 @@ def diff_pixels(
 
                         if old_stripped and new_stripped and old_stripped == new_stripped:
                             continue
-
-                        # Fuzzy character-level comparison
-                        if old_stripped and new_stripped:
-                            shorter = min(len(old_stripped), len(new_stripped))
-                            longer = max(len(old_stripped), len(new_stripped))
-                            if shorter > 0 and longer > 0:
-                                matches = sum(
-                                    1 for a, b in zip(old_stripped, new_stripped) if a == b
-                                )
-                                similarity = matches / longer
-                                if similarity > 0.6:
-                                    continue
 
                         # Only use OCR results if BOTH sides produced text.
                         if ocr_old_raw and ocr_new_raw:
