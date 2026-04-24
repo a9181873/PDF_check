@@ -21,6 +21,8 @@ export interface DiffItem {
   new_value: string | null;
   old_bbox: BBox | null;
   new_bbox: BBox | null;
+  old_image_base64?: string | null;
+  new_image_base64?: string | null;
   context: string;
   confidence: number;
   reviewed: boolean;

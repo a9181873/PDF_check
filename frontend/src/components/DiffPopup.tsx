@@ -94,10 +94,10 @@ const DiffPopupInner: React.FC<DiffPopupInnerProps> = ({
 
   const isImageDiff = diff.diff_type === DiffType.IMAGE_DIFF;
   const cropBase = taskId && isImageDiff ? buildApiUrl(`/api/compare/${taskId}/crop/${diff.id}`) : null;
-  const oldCropUrl = cropBase && diff.old_bbox ? `${cropBase}/old` : null;
-  const newCropUrl = cropBase && diff.new_bbox ? `${cropBase}/new` : null;
-  const showOldImage = isImageDiff && !!oldCropUrl && !oldCropFailed;
-  const showNewImage = isImageDiff && !!newCropUrl && !newCropFailed;
+  const oldCropUrl = diff.old_image_base64 || (cropBase && diff.old_bbox ? `${cropBase}/old` : null);
+  const newCropUrl = diff.new_image_base64 || (cropBase && diff.new_bbox ? `${cropBase}/new` : null);
+  const showOldImage = !!oldCropUrl && !oldCropFailed;
+  const showNewImage = !!newCropUrl && !newCropFailed;
 
   useEffect(() => {
     if (!lightbox) return;

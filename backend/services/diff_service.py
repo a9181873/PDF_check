@@ -369,8 +369,8 @@ def diff_tables(old_tables: list[ParsedTable], new_tables: list[ParsedTable]) ->
 def diff_pixels(
     old_pdf_path: str,
     new_pdf_path: str,
-    threshold: int = 15,
-    min_area: int = 200,
+    threshold: int = 30,
+    min_area: int = 400,
     dpi: int = 200,
 ) -> list[DiffItem]:
     """Pixel-level diff using PyMuPDF rendering + numpy + scipy connected components.
@@ -425,11 +425,26 @@ def diff_pixels(
                     context=f"Page {page_no} 整頁新增", confidence=0.99,
                 ))
 
+        def _words_in_rect(words_list, rect):
+            """Collect words that INTERSECT with rect.
+            Uses intersection (not center-point) so that long Chinese
+            spans whose bbox is wider than the diff region are captured.
+            """
+            result = []
+            for w in words_list:
+                if rect.intersects(fitz.Rect(w[:4])):
+                    result.append(w[4])
+            return " ".join(result).strip()
+
         for page_i in range(shared):
             page_no = page_i + 1
             page_old = doc_old[page_i]
             page_new = doc_new[page_i]
             ph_pt = page_old.rect.height  # PDF page height in points
+
+            # Pre-extract all words with coordinates for text-overlap suppression
+            old_words = page_old.get_text("words")  # [(x0,y0,x1,y1,"word",...), ...]
+            new_words = page_new.get_text("words")
 
             pix_old = page_old.get_pixmap(matrix=mat, colorspace=fitz.csGRAY)
             pix_new = page_new.get_pixmap(matrix=mat, colorspace=fitz.csGRAY)
@@ -474,15 +489,52 @@ def diff_pixels(
                 patch_old = arr_old[r0:r1, c0:c1].astype(np.float64)
                 patch_new = arr_new[r0:r1, c0:c1].astype(np.float64)
                 if patch_old.size >= 100:
-                    a_std = float(patch_old.std())
-                    b_std = float(patch_new.std())
-                    if a_std > 1.0 and b_std > 1.0:
-                        ncc = float(
-                            ((patch_old - patch_old.mean()) * (patch_new - patch_new.mean())).mean()
-                            / (a_std * b_std)
-                        )
-                        if ncc > 0.98:
+                    # Apply a light Gaussian blur to make the comparison robust against
+                    # tiny anti-aliasing shifts or sub-pixel kerning differences
+                    patch_old_b = ndimage.gaussian_filter(patch_old, sigma=1.0)
+                    patch_new_b = ndimage.gaussian_filter(patch_new, sigma=1.0)
+                    
+                    # Shift-Invariant NCC: search for the best alignment within +/- 5 pixels.
+                    # This suppresses identical text that was slightly moved by the designer
+                    # without needing to fall back to the error-prone OCR engine.
+                    h, w = patch_old_b.shape
+                    best_ncc = -1.0
+                    
+                    # Sort shifts by distance from center so we find exact matches immediately
+                    max_shift = 5
+                    shifts = [(dy, dx) for dy in range(-max_shift, max_shift+1) for dx in range(-max_shift, max_shift+1)]
+                    shifts.sort(key=lambda s: s[0]**2 + s[1]**2)
+                    
+                    for dy, dx in shifts:
+                        r_o_start, r_o_end = max(0, -dy), min(h, h - dy)
+                        c_o_start, c_o_end = max(0, -dx), min(w, w - dx)
+                        r_n_start, r_n_end = max(0, dy), min(h, h + dy)
+                        c_n_start, c_n_end = max(0, dx), min(w, w + dx)
+                        
+                        slice_o = patch_old_b[r_o_start:r_o_end, c_o_start:c_o_end]
+                        slice_n = patch_new_b[r_n_start:r_n_end, c_n_start:c_n_end]
+                        
+                        if slice_o.size < 50:
                             continue
+                            
+                        std_o = float(slice_o.std())
+                        std_n = float(slice_n.std())
+                        if std_o < 1.0 or std_n < 1.0:
+                            continue
+                            
+                        ncc = float(
+                            ((slice_o - slice_o.mean()) * (slice_n - slice_n.mean())).mean()
+                            / (std_o * std_n)
+                        )
+                        if ncc > best_ncc:
+                            best_ncc = ncc
+                        
+                        # Threshold for "identical text just shifted"
+                        if best_ncc > 0.94:
+                            break
+                            
+                    if best_ncc > 0.94:
+                        continue
 
                 # PDF points in fitz's top-left origin (Y grows down)
                 fx0 = float(c0) * scale_to_pt
@@ -498,51 +550,137 @@ def diff_pixels(
                     y1=ph_pt - fy0,
                 )
 
-                # Recover any text the PDF's text layer has inside this region so
-                # the popup can show readable text alongside the image crop.
-                # Shrink 4pt on each side so edge characters whose bbox clips the
-                # dilated mask don't leak into get_textbox — a 2pt shrink was
-                # too generous and picked up neighbour chars asymmetrically on
-                # old vs new, defeating the identity check below.
-                old_text: str | None = None
-                new_text: str | None = None
-                ot, nt = "", ""
-                shrink = 4.0
-                rx0, ry0, rx1, ry1 = fx0 + shrink, fy0 + shrink, fx1 - shrink, fy1 - shrink
-                if rx1 > rx0 and ry1 > ry0:
-                    rect = fitz.Rect(rx0, ry0, rx1, ry1)
-                    try:
-                        ot = (page_old.get_textbox(rect) or "").strip()
-                        nt = (page_new.get_textbox(rect) or "").strip()
-                    except Exception:
-                        ot, nt = "", ""
+                # ── Frame + Bone strategy (Two-Tier) ─────────────────────
+                # Frame = pixel diff region (定位：哪裡有改變)
+                # Bone Tier 1 = native PDF text layer (fast path)
+                # Bone Tier 2 = targeted local OCR on cropped patch (fallback
+                #               for "outline-text" PDFs where designers ran
+                #               "Create Outlines" before export, making all
+                #               glyphs vector paths with zero text layer).
+                fitz_rect = fitz.Rect(fx0, fy0, fx1, fy1)
+                search_rect = fitz_rect + (-3, -3, 3, 3)
 
-                # If both sides carry substantially the same text in this region,
-                # the pixel diff is rendering noise (font hinting, kerning micro-
-                # shifts, antialiasing) — suppress it. Use fuzzy match rather
-                # than exact equality because get_textbox is sensitive to sub-pt
-                # positional drift at the rect boundary: a 1-char asymmetric
-                # capture is common and should not defeat the identity check.
+                ot = _words_in_rect(old_words, search_rect)
+                nt = _words_in_rect(new_words, search_rect)
+
+                # ── Tier 1: native text layer comparison ──────────────────
                 if ot and nt:
                     on = _deep_normalize(ot)
                     nn = _deep_normalize(nt)
-                    if on and nn and SequenceMatcher(None, on, nn).ratio() >= 0.95:
-                        continue
+                    if on and nn and on == nn:
+                        continue  # identical text → rendering noise, suppress
 
-                if ot != nt:
+                # ── Tier 2: local OCR fallback (outline-text PDFs) ────────
+                # Triggered when NEITHER side has a native text layer in the
+                # diff region (old_words / new_words both empty OR both patches
+                # returned empty strings from the intersection check).
+                if not ot and not nt:
+                    try:
+                        import subprocess, tempfile, os as _os
+                        from PIL import Image as _PILImage
+
+                        # Render only the diff patch at 2× DPI for OCR clarity
+                        clip_rect = fitz.Rect(fx0, fy0, fx1, fy1)
+                        ocr_mat = fitz.Matrix(2.0, 2.0)
+
+                        pix_o = page_old.get_pixmap(matrix=ocr_mat, clip=clip_rect, colorspace=fitz.csGRAY)
+                        pix_n = page_new.get_pixmap(matrix=ocr_mat, clip=clip_rect, colorspace=fitz.csGRAY)
+
+                        def _ocr_patch(pix) -> str:
+                            """Run Tesseract on a fitz Pixmap, return recognized text."""
+                            pil_img = _PILImage.frombytes("L", (pix.width, pix.height), pix.samples)
+                            # Scale up to at least 100px tall for Tesseract accuracy
+                            if pil_img.height < 100:
+                                scale = max(1, 100 // pil_img.height + 1)
+                                pil_img = pil_img.resize(
+                                    (pil_img.width * scale, pil_img.height * scale),
+                                    _PILImage.LANCZOS,
+                                )
+                            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+                                pil_img.save(f.name)
+                                tmp_path = f.name
+                            try:
+                                result = subprocess.run(
+                                    ["tesseract", tmp_path, "stdout",
+                                     "-l", "chi_tra",
+                                     "--psm", "6",
+                                     "--oem", "1"],
+                                    capture_output=True, text=True, timeout=10,
+                                )
+                                return result.stdout.strip()
+                            except Exception:
+                                return ""
+                            finally:
+                                try:
+                                    _os.unlink(tmp_path)
+                                except Exception:
+                                    pass
+
+                        ocr_old_raw = _ocr_patch(pix_o)
+                        ocr_new_raw = _ocr_patch(pix_n)
+
+                        ocr_old_norm = _deep_normalize(ocr_old_raw)
+                        ocr_new_norm = _deep_normalize(ocr_new_raw)
+
+                        # Tesseract often inserts spurious spaces in Chinese text due to kerning
+                        # (e.g. `「 本` vs `「本`). Ignore all spaces for this suppression check.
+                        if ocr_old_norm and ocr_new_norm and ocr_old_norm.replace(" ", "") == ocr_new_norm.replace(" ", ""):
+                            # OCR confirms same content → pure rendering noise
+                            continue
+
+                        # Only use OCR results if BOTH sides produced text.
+                        # If only one side has text, OCR likely failed on the other side
+                        # (e.g. garbage English on Chinese glyphs). In that case, don't
+                        # trust OCR at all — fall through to IMAGE_DIFF.
+                        if ocr_old_raw and ocr_new_raw:
+                            ot = ocr_old_raw
+                            nt = ocr_new_raw
+                        # Otherwise: OCR unreliable → fall through to IMAGE_DIFF.
+
+                    except Exception:
+                        pass  # OCR unavailable or timed out → fall through
+
+                # ── Report: text diff or pure graphic diff ─────────────────
+                old_text: str | None = None
+                new_text: str | None = None
+                diff_type = DiffType.IMAGE_DIFF
+                context_label = f"Page {page_no} 圖形差異 ({actual_px:,} px)"
+
+                if ot or nt:
                     MAX_LEN = 200
                     old_text = (ot[:MAX_LEN] + "…") if len(ot) > MAX_LEN else (ot or None)
                     new_text = (nt[:MAX_LEN] + "…") if len(nt) > MAX_LEN else (nt or None)
+                    diff_type = DiffType.TEXT_MODIFIED
+                    context_label = f"Page {page_no} 內容變更"
+
+                # User requirement: only report text/number content changes.
+                # Pure graphic diffs (lines, borders, shading, logos) are noise.
+                if diff_type == DiffType.IMAGE_DIFF:
+                    continue
+
+                try:
+                    import base64
+                    clip_rect = fitz.Rect(fx0, fy0, fx1, fy1) + (-4, -4, 4, 4)
+                    mat_ui = fitz.Matrix(1.5, 1.5)
+                    p_o = page_old.get_pixmap(matrix=mat_ui, clip=clip_rect)
+                    p_n = page_new.get_pixmap(matrix=mat_ui, clip=clip_rect)
+                    b64_old = "data:image/png;base64," + base64.b64encode(p_o.tobytes("png")).decode("utf-8")
+                    b64_new = "data:image/png;base64," + base64.b64encode(p_n.tobytes("png")).decode("utf-8")
+                except Exception:
+                    b64_old = None
+                    b64_new = None
 
                 items.append(
                     DiffItem(
                         id="",
-                        diff_type=DiffType.IMAGE_DIFF,
+                        diff_type=diff_type,
                         old_value=old_text,
                         new_value=new_text,
                         old_bbox=bbox,
                         new_bbox=bbox,
-                        context=f"Page {page_no} 視覺差異 ({actual_px:,} px)",
+                        old_image_base64=b64_old,
+                        new_image_base64=b64_new,
+                        context=context_label,
                         confidence=0.95,
                     )
                 )
@@ -598,6 +736,12 @@ def diff_images(
                     continue
                 r = rects[0]
                 ph = page.rect.height
+                pw = page.rect.width
+                
+                # Ignore full-page background images (e.g. >= 80% of page area)
+                if (r.width * r.height) / (pw * ph) > 0.8:
+                    continue
+                    
                 page_imgs.append({
                     "xref": xref,
                     "phash": phash,
@@ -647,7 +791,10 @@ def diff_images(
                     ni = new_imgs[best_j]
                     hamming = oi["phash"] - ni["phash"]
                     size_changed = abs(oi["width"] - ni["width"]) > 2 or abs(oi["height"] - ni["height"]) > 2
-                    if hamming > 0 or size_changed:
+                    
+                    # Only report image change if hamming distance is significant (> 4) 
+                    # or size changed, to ignore minor export artifacts
+                    if hamming > 4 or size_changed:
                         desc_parts = []
                         if hamming > 0:
                             desc_parts.append(f"\u5716\u7247\u5167\u5bb9\u8b8a\u66f4 (hamming={hamming})")
@@ -706,6 +853,45 @@ def merge_diff_results(
         merged.extend(pixel_diffs)
     if image_diffs:
         merged.extend(image_diffs)
+
+    # ── Deduplication: remove smaller boxes contained within larger ones ──
+    # This prevents "框中有框" (box within box) where e.g. a table-level
+    # diff overlaps with cell-level or pixel-level diffs inside it.
+    def _get_bbox(item: DiffItem) -> BBox | None:
+        return item.new_bbox or item.old_bbox
+
+    def _contains(outer: BBox, inner: BBox) -> bool:
+        """Check if outer bbox fully contains inner bbox (same page)."""
+        if outer.page != inner.page:
+            return False
+        margin = 2.0  # tolerance in points
+        return (outer.x0 - margin <= inner.x0 and
+                outer.y0 - margin <= inner.y0 and
+                outer.x1 + margin >= inner.x1 and
+                outer.y1 + margin >= inner.y1)
+
+    def _area(b: BBox) -> float:
+        return max(0, b.x1 - b.x0) * max(0, b.y1 - b.y0)
+
+    if len(merged) > 1:
+        to_remove: set[int] = set()
+        for i in range(len(merged)):
+            if i in to_remove:
+                continue
+            bi = _get_bbox(merged[i])
+            if not bi:
+                continue
+            for j in range(len(merged)):
+                if j == i or j in to_remove:
+                    continue
+                bj = _get_bbox(merged[j])
+                if not bj:
+                    continue
+                # If j is fully inside i, and i is larger, remove j
+                if _contains(bi, bj) and _area(bi) > _area(bj) * 1.2:
+                    to_remove.add(j)
+        if to_remove:
+            merged = [item for idx, item in enumerate(merged) if idx not in to_remove]
 
     merged = sorted(merged, key=_sort_key)
     for index, item in enumerate(merged, start=1):

@@ -28,6 +28,8 @@ class DiffItem(BaseModel):
     new_value: str | None = None
     old_bbox: BBox | None = None
     new_bbox: BBox | None = None
+    old_image_base64: str | None = None
+    new_image_base64: str | None = None
     context: str
     confidence: float = Field(ge=0.0, le=1.0)
     reviewed: bool = False
