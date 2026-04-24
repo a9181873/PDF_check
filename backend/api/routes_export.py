@@ -11,6 +11,7 @@ from services.export_service import (
     export_review_excel,
     export_review_log_csv,
     export_review_log_json,
+    export_review_log_txt,
     export_review_report_pdf,
 )
 
@@ -149,6 +150,32 @@ async def export_log(comparison_id: str):
     return FileResponse(
         exported,
         media_type="application/json",
+        filename=filename,
+    )
+
+
+@router.get("/{comparison_id}/log-txt")
+async def export_log_txt(comparison_id: str):
+    report = _load_report(comparison_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Comparison not found")
+
+    checklist = get_checklist(comparison_id)
+    review_counts = get_review_counts(comparison_id)
+    review_logs = get_review_logs(comparison_id)
+    filename = _generate_filename("審核紀錄", report, "txt")
+    output = settings.export_dir / filename
+    exported = export_review_log_txt(
+        comparison_id,
+        report,
+        checklist=checklist,
+        review_counts=review_counts,
+        review_logs=review_logs,
+        output_path=str(output),
+    )
+    return FileResponse(
+        exported,
+        media_type="text/plain; charset=utf-8",
         filename=filename,
     )
 

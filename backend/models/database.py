@@ -78,6 +78,33 @@ def init_db() -> None:
                 imported_at TEXT NOT NULL,
                 FOREIGN KEY (comparison_id) REFERENCES comparisons(id)
             );
+
+            CREATE TABLE IF NOT EXISTS users (
+                id TEXT PRIMARY KEY,
+                username TEXT NOT NULL UNIQUE,
+                display_name TEXT NOT NULL,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'reviewer',
+                is_active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS resource_logs (
+                task_id TEXT PRIMARY KEY,
+                started_at TEXT NOT NULL,
+                finished_at TEXT,
+                elapsed_seconds REAL,
+                peak_memory_mb REAL,
+                avg_cpu_percent REAL,
+                peak_cpu_percent REAL,
+                old_filename TEXT,
+                new_filename TEXT,
+                total_diffs INTEGER,
+                system_info_json TEXT,
+                snapshots_json TEXT,
+                created_at TEXT NOT NULL
+            );
             """
         )
         _ensure_column(conn, "comparisons", "error_message", "TEXT")
@@ -422,3 +449,102 @@ def get_snapshot_dir(comparison_id: str) -> str | None:
     if not row:
         return None
     return row["snapshot_dir"]
+
+
+# ── User management ──────────────────────────────────────────────────────────
+
+import hashlib
+import secrets
+
+
+def _hash_password(password: str, salt: str | None = None) -> tuple[str, str]:
+    """Return (hash_hex, salt_hex)."""
+    if salt is None:
+        salt = secrets.token_hex(16)
+    h = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 100_000)
+    return h.hex(), salt
+
+
+def _make_password_hash(password: str) -> str:
+    """Encode as 'salt$hash'."""
+    hash_hex, salt = _hash_password(password)
+    return f"{salt}${hash_hex}"
+
+
+def verify_password(password: str, stored_hash: str) -> bool:
+    parts = stored_hash.split("$", 1)
+    if len(parts) != 2:
+        return False
+    salt, expected = parts
+    h, _ = _hash_password(password, salt)
+    return secrets.compare_digest(h, expected)
+
+
+def create_user(
+    username: str, display_name: str, password: str, role: str = "reviewer"
+) -> dict:
+    now = utc_now_iso()
+    user_id = str(uuid.uuid4())
+    pw_hash = _make_password_hash(password)
+    with get_connection() as conn:
+        conn.execute(
+            """INSERT INTO users (id, username, display_name, password_hash, role, is_active, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, 1, ?, ?)""",
+            (user_id, username, display_name, pw_hash, role, now, now),
+        )
+    return {"id": user_id, "username": username, "display_name": display_name, "role": role, "is_active": True, "created_at": now}
+
+
+def get_user_by_username(username: str) -> dict | None:
+    with get_connection() as conn:
+        row = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+    return dict(row) if row else None
+
+
+def get_user_by_id(user_id: str) -> dict | None:
+    with get_connection() as conn:
+        row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def list_users() -> list[dict]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, username, display_name, role, is_active, created_at, updated_at FROM users ORDER BY created_at ASC"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def update_user(user_id: str, *, display_name: str | None = None, password: str | None = None, role: str | None = None, is_active: bool | None = None) -> bool:
+    sets: list[str] = []
+    params: list = []
+    if display_name is not None:
+        sets.append("display_name = ?"); params.append(display_name)
+    if password is not None:
+        sets.append("password_hash = ?"); params.append(_make_password_hash(password))
+    if role is not None:
+        sets.append("role = ?"); params.append(role)
+    if is_active is not None:
+        sets.append("is_active = ?"); params.append(int(is_active))
+    if not sets:
+        return False
+    sets.append("updated_at = ?"); params.append(utc_now_iso())
+    params.append(user_id)
+    with get_connection() as conn:
+        conn.execute(f"UPDATE users SET {', '.join(sets)} WHERE id = ?", params)
+    return True
+
+
+def delete_user(user_id: str) -> bool:
+    with get_connection() as conn:
+        cur = conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    return cur.rowcount > 0
+
+
+def ensure_default_admin() -> None:
+    """Create default admin account if no users exist."""
+    with get_connection() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    if count == 0:
+        create_user("admin", "系統管理員", "admin123", role="admin")
+

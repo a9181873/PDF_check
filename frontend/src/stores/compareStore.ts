@@ -89,7 +89,14 @@ export const useCompareStore = create<CompareState>()(
       selectedDiffForPopup: null,
       scale: 1.0,
 
-      setTaskId: (taskId) => set({ taskId }),
+      setTaskId: (taskId) => set({ 
+        taskId, 
+        status: null, 
+        report: null, 
+        filteredItems: [],
+        selectedDiffId: null,
+        checklist: []
+      }),
 
       setScale: (scale) => set({ scale }),
 

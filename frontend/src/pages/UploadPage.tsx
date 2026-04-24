@@ -1,8 +1,8 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { isAxiosError } from 'axios';
 import { useNavigate } from 'react-router-dom';
-import { Upload, File, Folder, AlertCircle, CheckCircle, XCircle, Clock, ChevronRight } from 'lucide-react';
-import { compareApi, projectApi } from '../services/api';
+import { Upload, File, Folder, AlertCircle, CheckCircle, XCircle, Clock, ChevronRight, Search, Download } from 'lucide-react';
+import { compareApi, projectApi, buildApiUrl } from '../services/api';
 import { ComparisonInfo } from '../services/types';
 
 function getSuggestedProjectName(oldName: string, newName: string): string {
@@ -30,12 +30,30 @@ const UploadPage: React.FC = () => {
   const [isDragging, setIsDragging] = useState(false);
   const [recentComparisons, setRecentComparisons] = useState<ComparisonInfo[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [historySearch, setHistorySearch] = useState('');
+  const [openExportId, setOpenExportId] = useState<string | null>(null);
+  const exportDropdownRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  const filteredHistory = useMemo(() => {
+    if (!historySearch) return recentComparisons;
+    const q = historySearch.toLowerCase();
+    return recentComparisons.filter((comp) =>
+      comp.old_filename.toLowerCase().includes(q) ||
+      comp.new_filename.toLowerCase().includes(q) ||
+      comp.project_id.toLowerCase().includes(q)
+    );
+  }, [recentComparisons, historySearch]);
+
+  const handleHistoryExport = (compId: string, format: string) => {
+    window.open(buildApiUrl(`/api/export/${compId}/${format}`), '_blank', 'noopener,noreferrer');
+    setOpenExportId(null);
+  };
 
   useEffect(() => {
     const fetchHistory = async () => {
       setIsLoadingHistory(true);
       try {
-        const history = await projectApi.listAllComparisons(5);
+        const history = await projectApi.listAllComparisons(50);
         setRecentComparisons(history);
       } catch (err) {
         console.error('Failed to fetch history:', err);
@@ -45,6 +63,19 @@ const UploadPage: React.FC = () => {
     };
     fetchHistory();
   }, []);
+
+  // Close export dropdown on outside click
+  useEffect(() => {
+    if (!openExportId) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      const el = exportDropdownRefs.current[openExportId];
+      if (el && !el.contains(event.target as Node)) {
+        setOpenExportId(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [openExportId]);
 
   // Auto-suggest project name when both files are selected (only if user hasn't edited)
   useEffect(() => {
@@ -316,51 +347,130 @@ const UploadPage: React.FC = () => {
         </div>
 
         {/* History Section */}
-        {recentComparisons.length > 0 && (
-          <div className="mt-8 bg-white/95 rounded-[28px] shadow-large border border-white p-8 backdrop-blur">
-            <div className="flex items-center space-x-2 mb-6">
+        <div className="mt-8 bg-white/95 rounded-[28px] shadow-large border border-white p-8 backdrop-blur">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center space-x-2">
               <Clock className="text-gray-400" size={24} />
               <h2 className="text-xl font-bold text-gray-900">最近比對紀錄</h2>
+              <span className="text-sm text-gray-400">
+                ({filteredHistory.length}{historySearch ? ` / ${recentComparisons.length}` : ''})
+              </span>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {recentComparisons.map((comp) => (
+          </div>
+
+          {/* Search box */}
+          <div className="relative mb-4">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+            <input
+              type="text"
+              value={historySearch}
+              onChange={(e) => setHistorySearch(e.target.value)}
+              placeholder="搜尋檔案名稱..."
+              className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl bg-gray-50/80 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:bg-white transition-all text-sm"
+            />
+          </div>
+
+          {isLoadingHistory ? (
+            <div className="text-center py-8">
+              <div className="w-8 h-8 mx-auto mb-3 border-3 border-primary-600 border-t-transparent rounded-full animate-spin" />
+              <p className="text-sm text-gray-500">載入中...</p>
+            </div>
+          ) : filteredHistory.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">
+              {historySearch ? '找不到符合條件的紀錄' : '尚無比對紀錄'}
+            </div>
+          ) : (
+            <div className="space-y-2 max-h-[480px] overflow-y-auto pr-1">
+              {filteredHistory.map((comp) => (
                 <div
                   key={comp.id}
-                  onClick={() => navigate(`/compare/${comp.id}`)}
-                  className="group relative flex items-center p-4 bg-gray-50 hover:bg-primary-50 rounded-2xl border border-gray-100 hover:border-primary-100 cursor-pointer transition-all hover:shadow-md"
+                  className="group flex items-center p-3 bg-gray-50 hover:bg-primary-50 rounded-xl border border-gray-100 hover:border-primary-100 transition-all hover:shadow-sm"
                 >
-                  <div className="flex-1 min-w-0 pr-4">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-medium text-gray-500 bg-white px-2 py-1 rounded-md shadow-sm border border-gray-100">
-                        {new Date(comp.created_at).toLocaleDateString('zh-TW', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                      </span>
-                      {comp.status === 'done' ? (
-                        <span className="text-xs text-green-600 font-medium">已完成</span>
-                      ) : comp.status === 'error' ? (
-                        <span className="text-xs text-red-600 font-medium">錯誤</span>
-                      ) : (
-                        <span className="text-xs text-blue-600 font-medium animate-pulse">處理中</span>
+                  {/* Date */}
+                  <div className="flex-shrink-0 w-28 mr-3">
+                    <span className="text-xs font-medium text-gray-500 bg-white px-2 py-1 rounded-md shadow-sm border border-gray-100 block text-center">
+                      {new Date(comp.created_at).toLocaleDateString('zh-TW', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+
+                  {/* File names */}
+                  <div className="flex-1 min-w-0 mr-3">
+                    <div className="flex items-center space-x-2 text-sm">
+                      <span className="text-gray-400 flex-shrink-0">舊:</span>
+                      <span className="text-gray-700 truncate font-medium">{comp.old_filename}</span>
+                    </div>
+                    <div className="flex items-center space-x-2 text-sm mt-0.5">
+                      <span className="text-gray-400 flex-shrink-0">新:</span>
+                      <span className="text-gray-700 truncate font-medium">{comp.new_filename}</span>
+                    </div>
+                  </div>
+
+                  {/* Status */}
+                  <div className="flex-shrink-0 w-16 text-center mr-2">
+                    {comp.status === 'done' ? (
+                      <span className="text-xs text-green-600 font-medium bg-green-50 px-2 py-1 rounded-full">已完成</span>
+                    ) : comp.status === 'error' ? (
+                      <span className="text-xs text-red-600 font-medium bg-red-50 px-2 py-1 rounded-full">錯誤</span>
+                    ) : (
+                      <span className="text-xs text-blue-600 font-medium animate-pulse bg-blue-50 px-2 py-1 rounded-full">處理中</span>
+                    )}
+                  </div>
+
+                  {/* Export button */}
+                  {comp.status === 'done' && (
+                    <div className="relative flex-shrink-0 mr-2" ref={(el) => { exportDropdownRefs.current[comp.id] = el; }}>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setOpenExportId(openExportId === comp.id ? null : comp.id); }}
+                        className="p-2 rounded-lg border border-gray-200 bg-white text-gray-500 hover:text-primary-600 hover:border-primary-200 transition-colors"
+                        title="匯出紀錄"
+                      >
+                        <Download size={16} />
+                      </button>
+                      {openExportId === comp.id && (
+                        <div className="absolute right-0 top-full mt-1 w-44 bg-white rounded-xl border border-gray-200 shadow-lg z-20 overflow-hidden">
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); handleHistoryExport(comp.id, 'log-txt'); }}
+                            className="flex w-full items-center justify-between px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                          >
+                            <span>審核紀錄</span>
+                            <span className="text-xs text-gray-400">TXT</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); handleHistoryExport(comp.id, 'report'); }}
+                            className="flex w-full items-center justify-between px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                          >
+                            <span>檢核報告</span>
+                            <span className="text-xs text-gray-400">PDF</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); handleHistoryExport(comp.id, 'excel'); }}
+                            className="flex w-full items-center justify-between px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                          >
+                            <span>差異明細</span>
+                            <span className="text-xs text-gray-400">Excel</span>
+                          </button>
+                        </div>
                       )}
                     </div>
-                    <div className="mt-2 space-y-1">
-                      <div className="flex items-start space-x-2">
-                        <span className="text-xs text-gray-400 mt-0.5">舊:</span>
-                        <p className="text-sm text-gray-700 truncate font-medium">{comp.old_filename}</p>
-                      </div>
-                      <div className="flex items-start space-x-2">
-                        <span className="text-xs text-gray-400 mt-0.5">新:</span>
-                        <p className="text-sm text-gray-700 truncate font-medium">{comp.new_filename}</p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center text-gray-400 group-hover:text-primary-600 group-hover:translate-x-1 transition-all shadow-sm">
+                  )}
+
+                  {/* Navigate arrow */}
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/compare/${comp.id}`)}
+                    className="flex-shrink-0 w-8 h-8 rounded-full bg-white flex items-center justify-center text-gray-400 group-hover:text-primary-600 group-hover:translate-x-1 transition-all shadow-sm"
+                  >
                     <ChevronRight size={18} />
-                  </div>
+                  </button>
                 </div>
               ))}
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
         {/* Features grid */}
         <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6">

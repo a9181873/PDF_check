@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from api.routes_auth import router as auth_router
 from api.routes_compare import router as compare_router
 from api.routes_checklist import router as checklist_router
 from api.routes_export import router as export_router
@@ -11,7 +12,7 @@ from api.routes_project import router as project_router
 from api.routes_review import router as review_router
 from api.websocket import router as websocket_router
 from config import settings
-from models.database import ensure_default_project, init_db
+from models.database import ensure_default_admin, ensure_default_project, init_db
 
 app = FastAPI(title=settings.app_name, debug=settings.debug)
 
@@ -23,6 +24,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_router)
 app.include_router(compare_router)
 app.include_router(project_router)
 app.include_router(review_router)
@@ -39,11 +41,28 @@ def on_startup() -> None:
     settings.markdown_export_dir.mkdir(parents=True, exist_ok=True)
     init_db()
     ensure_default_project()
+    ensure_default_admin()
 
 
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/system/resource-logs")
+def get_resource_logs(limit: int = 50):
+    from services.resource_monitor import list_resource_logs
+    return list_resource_logs(limit)
+
+
+@app.get("/api/system/resource-logs/{task_id}")
+def get_resource_log_detail_route(task_id: str):
+    from services.resource_monitor import get_resource_log_detail as _get_detail
+    detail = _get_detail(task_id)
+    if not detail:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Resource log not found")
+    return detail
 
 
 from starlette.exceptions import HTTPException as StarletteHTTPException

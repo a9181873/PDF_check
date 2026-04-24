@@ -15,7 +15,7 @@ from pathlib import Path
 
 import fitz  # PyMuPDF
 
-from models.diff_models import DiffReport
+from models.diff_models import DiffReport, DiffType
 
 _logger = logging.getLogger(__name__)
 
@@ -112,3 +112,76 @@ def _render_pdf(
         pix.save(str(snap_dir / f"{prefix}_page_{page_no}.png"))
 
     doc.close()
+
+
+# Crop rendering for image-diff regions (no text layer available)
+_CROP_DPI = 200
+_CROP_SCALE = _CROP_DPI / 72.0
+_CROP_PADDING_PT = 6.0  # small margin around the region for readability
+
+
+def generate_diff_crops(
+    task_id: str,
+    old_pdf_path: str,
+    new_pdf_path: str,
+    report: DiffReport,
+    crops_base_dir: Path,
+) -> Path:
+    """Render cropped PNGs of IMAGE_DIFF regions from both PDFs.
+
+    Writes `{crops_base_dir}/{task_id}/{diff_id}_{old|new}.png` for each
+    IMAGE_DIFF item in the report. Text-based diffs already carry `old_value`
+    and `new_value`, so they do not need crops.
+    """
+    out_dir = crops_base_dir / task_id
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    image_items = [item for item in report.items if item.diff_type == DiffType.IMAGE_DIFF]
+    if not image_items:
+        return out_dir
+
+    _crop_side(old_pdf_path, image_items, side="old", out_dir=out_dir)
+    _crop_side(new_pdf_path, image_items, side="new", out_dir=out_dir)
+    return out_dir
+
+
+def _crop_side(pdf_path: str, items, side: str, out_dir: Path) -> None:
+    try:
+        doc = fitz.open(pdf_path)
+    except Exception as exc:
+        _logger.warning("Crop: failed to open %s: %s", pdf_path, exc)
+        return
+
+    mat = fitz.Matrix(_CROP_SCALE, _CROP_SCALE)
+    try:
+        for item in items:
+            bbox = item.old_bbox if side == "old" else item.new_bbox
+            if not bbox:
+                continue
+            page_idx = bbox.page - 1
+            if page_idx < 0 or page_idx >= len(doc):
+                continue
+
+            page = doc[page_idx]
+            page_height = page.rect.height
+            page_width = page.rect.width
+
+            # Bottom-left origin → top-left origin; pad and clamp to page bounds.
+            x0 = max(0.0, bbox.x0 - _CROP_PADDING_PT)
+            x1 = min(page_width, bbox.x1 + _CROP_PADDING_PT)
+            y0 = max(0.0, page_height - bbox.y1 - _CROP_PADDING_PT)
+            y1 = min(page_height, page_height - bbox.y0 + _CROP_PADDING_PT)
+
+            clip = fitz.Rect(x0, y0, x1, y1)
+            if clip.is_empty or clip.is_infinite:
+                continue
+
+            try:
+                pix = page.get_pixmap(matrix=mat, clip=clip)
+                pix.save(str(out_dir / f"{item.id}_{side}.png"))
+            except Exception as exc:
+                _logger.debug(
+                    "Crop: render failed id=%s side=%s: %s", item.id, side, exc
+                )
+    finally:
+        doc.close()

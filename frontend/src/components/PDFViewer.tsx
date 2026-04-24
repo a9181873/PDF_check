@@ -27,6 +27,8 @@ interface PDFViewerProps {
   selectedDiffId?: string | null;
   /** Callback when a diff overlay rectangle is clicked */
   onDiffClick?: (diff: DiffItem) => void;
+  /** Whether to show the text label inside each diff overlay */
+  showDiffLabels?: boolean;
 }
 
 /** Track per-page rendered dimensions */
@@ -52,6 +54,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
   diffItems = [],
   selectedDiffId = null,
   onDiffClick,
+  showDiffLabels = true,
 }) => {
   const [numPages, setNumPages] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -299,6 +302,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
                               pdfPageWidth={dims.pdfWidth}
                               pdfPageHeight={dims.pdfHeight}
                               onDiffClick={onDiffClick}
+                              showLabels={showDiffLabels}
                             />
                           )}
                           {/* Page number badge */}

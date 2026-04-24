@@ -1,4 +1,5 @@
 import io
+import re
 import shutil
 import uuid
 import zipfile
@@ -77,6 +78,11 @@ def _run_compare_task(
     old_name: str,
     new_name: str,
 ) -> None:
+    # Start resource monitoring
+    from services.resource_monitor import ResourceMonitor, save_resource_log
+    monitor = ResourceMonitor(task_id)
+    monitor.start()
+
     try:
         update_comparison_status(task_id, "parsing")
         _set_task_progress(task_id, "parsing", 10, "parsing old pdf")
@@ -124,11 +130,25 @@ def _run_compare_task(
             )
             save_snapshot_dir(task_id, str(snap_dir))
         except Exception as exc:
-            # Snapshots are optional — never block the comparison result, but log
-            # so failures are visible in audit logs rather than silently missing.
             import logging
             logging.getLogger(__name__).warning(
                 "Snapshot generation failed for task %s: %s", task_id, exc
+            )
+
+        try:
+            from services.snapshot_service import generate_diff_crops
+            settings.crops_dir.mkdir(parents=True, exist_ok=True)
+            generate_diff_crops(
+                task_id=task_id,
+                old_pdf_path=old_path,
+                new_pdf_path=new_path,
+                report=report,
+                crops_base_dir=settings.crops_dir,
+            )
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Crop generation failed for task %s: %s", task_id, exc
             )
 
         def updater(state):
@@ -139,7 +159,16 @@ def _run_compare_task(
             state.error_message = None
 
         TASK_STORE.update(task_id, updater)
+
+        # Stop monitor and save resource log
+        res_log = monitor.stop(old_filename=old_name, new_filename=new_name, total_diffs=report.total_diffs)
+        try:
+            save_resource_log(res_log)
+        except Exception:
+            pass
+
     except Exception as exc:  # pragma: no cover - defensive wrapper
+        monitor.stop(old_filename=old_name, new_filename=new_name)
         message = str(exc)
         save_comparison_error(task_id, message)
         _set_task_error(task_id, message)
@@ -399,5 +428,32 @@ async def download_pdf(task_id: str, version: str):
     candidates = list(upload_dir.glob(f"{task_id}_*.pdf"))
     if candidates:
         return FileResponse(candidates[0], media_type="application/pdf", filename=original_filename)
-    
+
     raise HTTPException(status_code=404, detail="PDF file not found")
+
+
+_DIFF_ID_RE = re.compile(r"^d\d{3,}$")
+
+
+@router.get("/{task_id}/crop/{diff_id}/{side}")
+async def get_diff_crop(task_id: str, diff_id: str, side: str):
+    """Return a cropped PNG of an IMAGE_DIFF region from the old/new PDF.
+
+    Generated post-compare by snapshot_service.generate_diff_crops.
+    """
+    if not _DIFF_ID_RE.match(diff_id):
+        raise HTTPException(status_code=400, detail="Invalid diff id")
+
+    normalized = side.strip().lower()
+    if normalized not in {"old", "new"}:
+        raise HTTPException(status_code=400, detail="side must be 'old' or 'new'")
+
+    row = get_comparison(task_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    crop_path = settings.crops_dir / task_id / f"{diff_id}_{normalized}.png"
+    if not crop_path.exists():
+        raise HTTPException(status_code=404, detail="Crop not found")
+
+    return FileResponse(crop_path, media_type="image/png")

@@ -144,26 +144,29 @@
     z-index: 30;
   }
 
-  /* Use a single light yellow highlight for ALL diff types so differences remain visible on grayscale pages */
+  /* High-visibility yellow for ALL diff types to ensure contrast on grayscale backgrounds */
   .diff-overlay-added,
   .diff-overlay-deleted,
   .diff-overlay-modified,
   .diff-overlay-text,
   .diff-overlay-image,
   .diff-overlay-highlight {
-    background-color: rgba(255, 235, 59, 0.4);
-    border: 2px solid rgba(255, 193, 7, 0.90);
-    outline: 1px solid rgba(255, 255, 255, 0.70);
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.30);
+    background-color: rgba(255, 214, 0, 0.45); /* Vibrant yellow, slightly more opaque */
+    border: 2px solid #FFAB00; /* Deep amber border for definition */
+    outline: 1px solid white;
+    box-shadow: 0 0 0 1px rgba(255, 214, 0, 0.3);
+    mix-blend-mode: multiply; /* Helps the highlight 'tint' the text below without washing it out */
   }
+  
   .diff-overlay-added:hover,  .diff-overlay-deleted:hover,
   .diff-overlay-modified:hover, .diff-overlay-text:hover,
   .diff-overlay-image:hover, .diff-overlay-highlight:hover,
   .diff-overlay-added.is-selected, .diff-overlay-deleted.is-selected,
   .diff-overlay-modified.is-selected, .diff-overlay-text.is-selected,
   .diff-overlay-image.is-selected, .diff-overlay-highlight.is-selected {
-    background-color: rgba(255, 235, 59, 0.7);
-    border-color: rgba(255, 179, 0, 0.95);
-    box-shadow: 0 0 0 2px rgba(255, 235, 59, 0.45), 0 4px 16px rgba(0, 0, 0, 0.18);
+    background-color: rgba(255, 214, 0, 0.75);
+    border-color: #FF6F00;
+    box-shadow: 0 0 0 3px rgba(255, 214, 0, 0.5), 0 8px 16px rgba(0, 0, 0, 0.2);
+    z-index: 50 !important;
   }
 }

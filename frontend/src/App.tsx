@@ -1,8 +1,12 @@
-import { Suspense, lazy } from 'react';
+import { Suspense, lazy, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { useAuthStore } from './stores/authStore';
 
+const LoginPage = lazy(() => import('./pages/LoginPage'));
 const UploadPage = lazy(() => import('./pages/UploadPage'));
 const ComparePage = lazy(() => import('./pages/ComparePage'));
+const PopoutPage = lazy(() => import('./pages/PopoutPage'));
+const AdminPage = lazy(() => import('./pages/AdminPage'));
 
 function RouteFallback() {
   return (
@@ -15,16 +19,30 @@ function RouteFallback() {
   );
 }
 
-const PopoutPage = lazy(() => import('./pages/PopoutPage'));
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+  return <>{children}</>;
+}
 
 function App() {
+  const loadFromStorage = useAuthStore((s) => s.loadFromStorage);
+
+  useEffect(() => {
+    loadFromStorage();
+  }, [loadFromStorage]);
+
   return (
     <BrowserRouter>
       <Suspense fallback={<RouteFallback />}>
         <Routes>
-          <Route path="/" element={<UploadPage />} />
-          <Route path="/compare/:taskId" element={<ComparePage />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/" element={<ProtectedRoute><UploadPage /></ProtectedRoute>} />
+          <Route path="/compare/:taskId" element={<ProtectedRoute><ComparePage /></ProtectedRoute>} />
           <Route path="/popout/:taskId/:version" element={<PopoutPage />} />
+          <Route path="/admin" element={<ProtectedRoute><AdminPage /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>

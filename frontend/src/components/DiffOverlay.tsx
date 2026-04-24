@@ -15,6 +15,7 @@ interface DiffOverlayProps {
   pdfPageHeight: number;
   selectedDiffId?: string | null;
   onDiffClick?: (diff: DiffItem) => void;
+  showLabels?: boolean;
 }
 
 const getDiffColor = (_type: DiffType) => {
@@ -74,6 +75,7 @@ const DiffOverlay: React.FC<DiffOverlayProps> = ({
   pdfPageHeight,
   selectedDiffId = null,
   onDiffClick,
+  showLabels = true,
 }) => {
   // Filter diffs for this specific page
   const pageDiffs = diffItems.filter((diff) => {
@@ -123,11 +125,13 @@ const DiffOverlay: React.FC<DiffOverlayProps> = ({
             onClick={() => onDiffClick?.(diff)}
             title={titleText}
           >
-            <div className="absolute inset-x-0 top-0 pointer-events-none px-1 pt-1">
-              <div className="bg-white/90 text-[10px] text-gray-900 rounded-full px-1.5 py-0.5 shadow-sm max-w-full overflow-hidden text-ellipsis whitespace-nowrap">
-                {titleText}
+            {showLabels && (
+              <div className="absolute inset-x-0 top-0 pointer-events-none px-1 pt-1">
+                <div className="bg-white/90 text-[10px] text-gray-900 rounded-full px-1.5 py-0.5 shadow-sm max-w-full overflow-hidden text-ellipsis whitespace-nowrap">
+                  {titleText}
+                </div>
               </div>
-            </div>
+            )}
             {/* Tooltip on hover */}
             <div className="absolute -top-8 left-1/2 transform -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-20">
               <div className="bg-gray-900 text-white text-xs py-1 px-2 rounded whitespace-nowrap max-w-[200px] truncate">

@@ -17,6 +17,7 @@ DEFAULT_PAGE_HEIGHT_PT = 842.0
 class ParsedParagraph:
     text: str
     bbox: BBox
+    char_bboxes: list[BBox] | None = None
     style: str | None = None
 
 
@@ -241,15 +242,17 @@ def _parse_via_fitz(pdf_path: Path) -> ParsedDocument:
 
     paragraphs: list[ParsedParagraph] = []
     raw_pages: list[dict] = []
-    total_chars = 0
-    total_images = 0
+    image_pages = 0
+    total_pages = 0
 
     with fitz.open(pdf_path) as doc:
+        total_pages = len(doc)
         for page_index, page in enumerate(doc, start=1):
-            page_dict = page.get_text("dict")
+            page_dict = page.get_text("rawdict")
             raw_pages.append(page_dict)
             page_height = float(page.rect.height)
-            total_images += len(page.get_images())
+            page_image_count = len(page.get_images())
+            page_char_count = 0
 
             for block in page_dict.get("blocks", []):
                 if block.get("type") != 0:
@@ -258,26 +261,47 @@ def _parse_via_fitz(pdf_path: Path) -> ParsedDocument:
                 lines = block.get("lines", [])
                 for line in lines:
                     parts: list[str] = []
+                    line_char_bboxes: list[BBox] = []
+
                     for span in line.get("spans", []):
-                        text = str(span.get("text", "")).strip()
+                        # Use character-level info if available in rawdict
+                        chars = span.get("chars", [])
+                        if chars:
+                            for c in chars:
+                                c_bbox = _to_bottom_left_bbox(
+                                    page_number=page_index,
+                                    page_height=page_height,
+                                    block_bbox=c.get("bbox", [0, 0, 0, 0]),
+                                )
+                                line_char_bboxes.append(c_bbox)
+
+                        text = str(span.get("text", ""))
                         if text:
                             parts.append(text)
 
-                    joined = " ".join(parts).strip()
-                    if not joined:
+                    joined = "".join(parts) # Don't strip or space-join if we want exact char alignment
+                    if not joined.strip():
                         continue
 
-                    total_chars += len(joined)
+                    page_char_count += len(joined)
                     line_bbox = _to_bottom_left_bbox(
                         page_number=page_index,
                         page_height=page_height,
                         block_bbox=line.get("bbox", [0, 0, 0, 0]),
                     )
-                    paragraphs.append(ParsedParagraph(text=joined, bbox=line_bbox))
+                    paragraphs.append(ParsedParagraph(
+                        text=joined,
+                        bbox=line_bbox,
+                        char_bboxes=line_char_bboxes if len(line_char_bboxes) == len(joined) else None
+                    ))
 
-        # Image-only PDF: no meaningful text layer, every page is a raster image.
-        # Tag this so the diff engine can switch to pixel-level comparison.
-        is_image_pdf = total_chars < 20 and total_images > 0
+            if page_char_count < 10 and page_image_count > 0:
+                image_pages += 1
+
+        # Per-page judgement: only flag as image PDF when ≥70% of pages are essentially
+        # rasterized (no meaningful text + has images). Prevents "one scan page + lots of
+        # text pages" being forced into pixel-only diff.
+        is_image_pdf = total_pages > 0 and image_pages >= max(1, int(0.7 * total_pages))
 
         markdown_lines = [paragraph.text for paragraph in paragraphs]
         markdown = "\n\n".join(markdown_lines)

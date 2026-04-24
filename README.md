@@ -23,10 +23,11 @@ Browser
         └─ WebSocket (/ws/compare/{task_id})
               │
 FastAPI
+  ├─ routes_auth.py: 帳號登入、使用者管理 (JWT)
   ├─ routes_compare.py: 任務建立、狀態查詢、結果與 PDF/Markdown 下載
   ├─ routes_review.py: 差異審核與摘要
   ├─ routes_checklist.py: 核對清單匯入與更新
-  ├─ routes_export.py: 匯出標註 PDF / Excel
+  ├─ routes_export.py: 匯出標註 PDF / Excel / TXT
   ├─ routes_project.py: 專案列表與比較歷史
   └─ websocket.py: 即時進度推播
         │
@@ -38,7 +39,7 @@ Services
   └─ coord_transformer.py: PDF 座標轉換工具
         │
 Persistence
-  ├─ SQLite: projects / comparisons / review_logs
+  ├─ SQLite: projects / comparisons / review_logs / users
   ├─ uploads: 原始 PDF
   ├─ exports: 匯出物與 markdown
   └─ TASK_STORE / CHECKLIST_STORE: 執行中任務與暫時記憶體狀態
@@ -80,17 +81,20 @@ Persistence
 - Markdown 匯出
 - 標註 PDF 匯出
 - Excel 審核報表匯出
-- 專案列表與比較紀錄查詢
+- 審核紀錄 TXT 匯出（人類可讀格式）
+- 專案列表與比較紀錄查詢（含搜尋與列表呈現）
 - Docker 與一鍵啟動腳本
 - 前端 route-level 與 component-level code-splitting
+- **帳號密碼管理機制** — JWT 認證、登入頁面、帳號管理頁面、審核自動帶入帳號
+- **響應式 DiffPopup** — 內容修改框依瀏覽器解析度自適應，底部按鈕永遠可見
+- **像素差異 + 文字交叉驗證** — 降低肉眼看起來一致卻被標記的誤判
 
 ### 目前限制
 
-- `diff_tables()` 已提供基礎版 table-level / cell-level 文字比對，但 bbox 目前仍以整張表為主，尚未做到精準 cell bbox
-- `diff_pixels()` 預設停用，沒有像素級 fallback
+- `diff_tables()` 已提供基礎版 table-level / cell-level 文字比對，但 bbox 目前仍以整張表為主
 - checklist 會持久化到 SQLite，但 `CHECKLIST_STORE` 仍保留作為執行中快取
 - 審核 summary 以每個 `diff_item_id` 最新一筆 `review_logs` 為準
-- 若本機開發未指定 `DATA_DIR`，建議明確設定 runtime 路徑，避免資料位置不一致
+- 若本機開發未指定 `DATA_DIR`，建議明確設定 runtime 路徑
 
 ## 目錄結構
 
@@ -305,12 +309,22 @@ Docling 解析時會啟用 OCR，語言來自 `OCR_LANGS`，預設為 `eng`，Do
 - `GET /api/export/{comparison_id}/report`
 - `GET /api/export/{comparison_id}/log`
 - `GET /api/export/{comparison_id}/log-csv`
+- `GET /api/export/{comparison_id}/log-txt` ← 新增
 
 ### Project
 
 - `GET /api/projects`
 - `POST /api/projects`
 - `GET /api/projects/{project_id}/comparisons`
+
+### Auth (新增)
+
+- `POST /api/auth/login` — 帳號密碼登入
+- `GET /api/auth/me` — 取得登入使用者資訊
+- `GET /api/auth/users` — 列出所有帳號 (admin)
+- `POST /api/auth/users` — 建立帳號 (admin)
+- `PUT /api/auth/users/{id}` — 修改帳號 (admin)
+- `DELETE /api/auth/users/{id}` — 刪除帳號 (admin)
 
 ## 資料儲存
 
@@ -322,6 +336,7 @@ Docling 解析時會啟用 OCR，語言來自 `OCR_LANGS`，預設為 `eng`，Do
 - `comparisons`
 - `review_logs`
 - `checklists`
+- `users` — 帳號密碼管理 (pbkdf2 雜湊)
 
 實際上目前：
 

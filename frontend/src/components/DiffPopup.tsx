@@ -1,7 +1,10 @@
-import React, { useState } from 'react';
-import { CheckCircle, Copy, ExternalLink, Flag, X } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { CheckCircle, Copy, ExternalLink, Flag, Maximize2, Minus, Plus, RotateCcw, X } from 'lucide-react';
+import { TransformComponent, TransformWrapper } from 'react-zoom-pan-pinch';
 
+import { buildApiUrl } from '../services/api';
 import { DiffItem, DiffType } from '../services/types';
+import { useAuthStore } from '../stores/authStore';
 
 interface DiffPopupProps {
   diff: DiffItem | null;
@@ -9,6 +12,7 @@ interface DiffPopupProps {
   onClose: () => void;
   onConfirm: (diffId: string, reviewer?: string, note?: string) => void;
   onFlag: (diffId: string, reviewer?: string, note?: string) => void;
+  taskId?: string | null;
   className?: string;
 }
 
@@ -78,10 +82,31 @@ const DiffPopupInner: React.FC<DiffPopupInnerProps> = ({
   onClose,
   onConfirm,
   onFlag,
+  taskId,
   className = '',
 }) => {
-  const [reviewer, setReviewer] = useState(diff.reviewed_by || '');
+  const authUser = useAuthStore((s) => s.user);
+  const [reviewer, setReviewer] = useState(diff.reviewed_by || authUser?.display_name || '');
   const [note, setNote] = useState('');
+  const [oldCropFailed, setOldCropFailed] = useState(false);
+  const [newCropFailed, setNewCropFailed] = useState(false);
+  const [lightbox, setLightbox] = useState<{ url: string; label: string } | null>(null);
+
+  const isImageDiff = diff.diff_type === DiffType.IMAGE_DIFF;
+  const cropBase = taskId && isImageDiff ? buildApiUrl(`/api/compare/${taskId}/crop/${diff.id}`) : null;
+  const oldCropUrl = cropBase && diff.old_bbox ? `${cropBase}/old` : null;
+  const newCropUrl = cropBase && diff.new_bbox ? `${cropBase}/new` : null;
+  const showOldImage = isImageDiff && !!oldCropUrl && !oldCropFailed;
+  const showNewImage = isImageDiff && !!newCropUrl && !newCropFailed;
+
+  useEffect(() => {
+    if (!lightbox) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setLightbox(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [lightbox]);
 
   const handleConfirm = () => {
     onConfirm(diff.id, reviewer || undefined, note || undefined);
@@ -98,13 +123,14 @@ const DiffPopupInner: React.FC<DiffPopupInnerProps> = ({
   };
 
   return (
-    <div className={`relative w-full max-w-2xl bg-white rounded-2xl shadow-2xl animate-fade-in ${className}`}>
-      <div className="flex items-center justify-between p-6 border-b border-gray-200">
-        <div className="flex items-center space-x-3">
+    <div className={`relative w-full max-w-2xl max-h-[90vh] bg-white rounded-2xl shadow-2xl animate-fade-in flex flex-col ${className}`}>
+      {/* Fixed header */}
+      <div className="flex items-center justify-between p-4 sm:p-6 border-b border-gray-200 flex-shrink-0">
+        <div className="flex items-center flex-wrap gap-2">
           <div className={`px-3 py-1.5 rounded-full border ${getDiffColor(diff.diff_type)}`}>
-            <span className="font-medium">{getDiffLabel(diff.diff_type)}</span>
+            <span className="font-medium text-sm">{getDiffLabel(diff.diff_type)}</span>
           </div>
-          <span className="text-sm text-gray-500">ID: {diff.id}</span>
+          <span className="text-xs sm:text-sm text-gray-500">ID: {diff.id}</span>
           {diff.reviewed ? (
             <div className="flex items-center space-x-1 px-2 py-1 bg-green-100 text-green-800 rounded-full">
               <CheckCircle size={12} />
@@ -115,33 +141,34 @@ const DiffPopupInner: React.FC<DiffPopupInnerProps> = ({
         <button
           type="button"
           onClick={onClose}
-          className="p-2 rounded-full hover:bg-gray-100 transition-colors"
+          className="p-2 rounded-full hover:bg-gray-100 transition-colors flex-shrink-0"
         >
           <X size={20} />
         </button>
       </div>
 
-      <div className="p-6">
-        <div className="mb-6">
+      {/* Scrollable content */}
+      <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6">
+        <div className="mb-4 sm:mb-6">
           <h4 className="text-sm font-medium text-gray-500 mb-2">差異摘要</h4>
           <div
-            className="rounded-2xl p-4 mb-4"
+            className="rounded-2xl p-3 sm:p-4 mb-4"
             style={{
               backgroundColor: 'rgba(255, 246, 190, 0.16)',
               border: '1px solid rgba(255, 221, 120, 0.50)',
             }}
           >
             <p className="text-sm text-gray-900 whitespace-pre-wrap break-words">
-              {diff.diff_type === DiffType.IMAGE_DIFF
-                ? '此範圍內偵測到視覺或排版變更（例如：圖片內容、表格外框、或文字位置移動），故無提取對應的純文字。'
-                : diff.old_value && diff.new_value
+              {diff.old_value && diff.new_value
                 ? getTrimmedDiffText(diff.old_value, diff.new_value)
-                : diff.new_value ?? diff.old_value ?? diff.context}
+                : diff.new_value ?? diff.old_value ?? (isImageDiff
+                  ? '此範圍內偵測到視覺或排版變更（例如：圖片內容、表格外框、或文字位置移動），故無提取對應的純文字。'
+                  : diff.context)}
             </p>
           </div>
 
           <h4 className="text-sm font-medium text-gray-500 mb-2">位置</h4>
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center flex-wrap gap-2">
             <ExternalLink size={16} className="text-gray-400" />
             <span className="text-gray-700">{diff.context}</span>
             {diff.confidence ? (
@@ -152,7 +179,7 @@ const DiffPopupInner: React.FC<DiffPopupInnerProps> = ({
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-6 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 mb-4 sm:mb-6">
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <h4 className="text-sm font-medium text-red-600">原始內容</h4>
@@ -167,16 +194,35 @@ const DiffPopupInner: React.FC<DiffPopupInnerProps> = ({
                 </button>
               ) : null}
             </div>
-            <div className={`p-4 rounded-lg border ${diff.old_value ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-200'}`}>
+            <div className={`p-3 sm:p-4 rounded-lg border space-y-3 ${diff.old_value || showOldImage ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-200'}`}>
               {diff.old_value ? (
                 <pre className="text-sm text-gray-800 whitespace-pre-wrap break-words font-sans">
                   {diff.old_value}
                 </pre>
-              ) : (
+              ) : null}
+              {showOldImage && oldCropUrl ? (
+                <button
+                  type="button"
+                  onClick={() => setLightbox({ url: oldCropUrl, label: '原始內容' })}
+                  className="group relative block w-full cursor-zoom-in"
+                  title="點擊放大"
+                >
+                  <img
+                    src={oldCropUrl}
+                    alt="原始區域截圖"
+                    onError={() => setOldCropFailed(true)}
+                    className="max-w-full h-auto rounded border border-red-100 bg-white"
+                  />
+                  <span className="absolute top-1 right-1 p-1 rounded bg-black/50 text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Maximize2 size={14} />
+                  </span>
+                </button>
+              ) : null}
+              {!diff.old_value && !showOldImage ? (
                 <p className="text-sm text-gray-500 italic">
-                  {diff.diff_type === DiffType.IMAGE_DIFF ? '無原始文字（純視覺差異）' : '無原始內容'}
+                  {isImageDiff ? (oldCropFailed || !oldCropUrl ? '無法載入截圖' : '無原始文字（純視覺差異）') : '無原始內容'}
                 </p>
-              )}
+              ) : null}
             </div>
           </div>
 
@@ -194,21 +240,40 @@ const DiffPopupInner: React.FC<DiffPopupInnerProps> = ({
                 </button>
               ) : null}
             </div>
-            <div className={`p-4 rounded-lg border ${diff.new_value ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
+            <div className={`p-3 sm:p-4 rounded-lg border space-y-3 ${diff.new_value || showNewImage ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
               {diff.new_value ? (
                 <pre className="text-sm text-gray-800 whitespace-pre-wrap break-words font-sans">
                   {diff.new_value}
                 </pre>
-              ) : (
+              ) : null}
+              {showNewImage && newCropUrl ? (
+                <button
+                  type="button"
+                  onClick={() => setLightbox({ url: newCropUrl, label: '修訂內容' })}
+                  className="group relative block w-full cursor-zoom-in"
+                  title="點擊放大"
+                >
+                  <img
+                    src={newCropUrl}
+                    alt="修訂區域截圖"
+                    onError={() => setNewCropFailed(true)}
+                    className="max-w-full h-auto rounded border border-green-100 bg-white"
+                  />
+                  <span className="absolute top-1 right-1 p-1 rounded bg-black/50 text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Maximize2 size={14} />
+                  </span>
+                </button>
+              ) : null}
+              {!diff.new_value && !showNewImage ? (
                 <p className="text-sm text-gray-500 italic">
-                  {diff.diff_type === DiffType.IMAGE_DIFF ? '無修訂文字（純視覺差異）' : '無修訂內容'}
+                  {isImageDiff ? (newCropFailed || !newCropUrl ? '無法載入截圖' : '無修訂文字（純視覺差異）') : '無修訂內容'}
                 </p>
-              )}
+              ) : null}
             </div>
           </div>
         </div>
 
-        <div className="mb-6 space-y-4">
+        <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">審核人員</label>
             <input
@@ -225,14 +290,15 @@ const DiffPopupInner: React.FC<DiffPopupInnerProps> = ({
               value={note}
               onChange={(event) => setNote(event.target.value)}
               placeholder="輸入審核備註 (選填)"
-              rows={3}
+              rows={2}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
             />
           </div>
         </div>
       </div>
 
-      <div className="flex items-center justify-between p-6 border-t border-gray-200 bg-[#F5F5F5] rounded-b-2xl">
+      {/* Fixed footer - always visible */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between p-4 sm:p-6 gap-3 border-t border-gray-200 bg-[#F5F5F5] rounded-b-2xl flex-shrink-0">
         <div className="text-sm text-gray-500">
           {diff.reviewed ? (
             <div className="flex items-center space-x-2">
@@ -243,18 +309,18 @@ const DiffPopupInner: React.FC<DiffPopupInnerProps> = ({
             <span>尚未審核</span>
           )}
         </div>
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+            className="px-3 sm:px-4 py-2 sm:py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm"
           >
             關閉
           </button>
           <button
             type="button"
             onClick={handleFlag}
-            className="px-4 py-2.5 border border-red-300 text-red-700 bg-red-50 rounded-lg hover:bg-red-100 transition-colors flex items-center space-x-2"
+            className="px-3 sm:px-4 py-2 sm:py-2.5 border border-red-300 text-red-700 bg-red-50 rounded-lg hover:bg-red-100 transition-colors flex items-center space-x-1 sm:space-x-2 text-sm"
           >
             <Flag size={16} />
             <span>標記問題</span>
@@ -262,13 +328,89 @@ const DiffPopupInner: React.FC<DiffPopupInnerProps> = ({
           <button
             type="button"
             onClick={handleConfirm}
-            className="px-4 py-2.5 bg-diff-added text-white rounded-lg hover:bg-emerald-600 transition-colors flex items-center space-x-2"
+            className="px-3 sm:px-4 py-2 sm:py-2.5 bg-diff-added text-white rounded-lg hover:bg-emerald-600 transition-colors flex items-center space-x-1 sm:space-x-2 text-sm"
           >
             <CheckCircle size={16} />
             <span>確認此修改</span>
           </button>
         </div>
       </div>
+
+      {lightbox ? (
+        <div
+          className="fixed inset-0 z-[60] flex flex-col bg-black/80"
+          onClick={() => setLightbox(null)}
+        >
+          <div
+            className="flex items-center justify-between px-4 py-3 text-white"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <span className="text-sm font-medium">{lightbox.label}</span>
+            <button
+              type="button"
+              onClick={() => setLightbox(null)}
+              className="p-2 rounded-full hover:bg-white/10 transition-colors"
+              title="關閉 (Esc)"
+            >
+              <X size={20} />
+            </button>
+          </div>
+          <div
+            className="flex-1 min-h-0 overflow-hidden"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <TransformWrapper
+              initialScale={1}
+              minScale={0.5}
+              maxScale={10}
+              wheel={{ step: 0.15 }}
+              doubleClick={{ mode: 'reset' }}
+            >
+              {({ zoomIn, zoomOut, resetTransform }) => (
+                <>
+                  <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center space-x-2 bg-black/60 text-white rounded-full px-2 py-1">
+                    <button
+                      type="button"
+                      onClick={() => zoomOut()}
+                      className="p-2 rounded-full hover:bg-white/10"
+                      title="縮小"
+                    >
+                      <Minus size={16} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => resetTransform()}
+                      className="p-2 rounded-full hover:bg-white/10"
+                      title="重置"
+                    >
+                      <RotateCcw size={16} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => zoomIn()}
+                      className="p-2 rounded-full hover:bg-white/10"
+                      title="放大"
+                    >
+                      <Plus size={16} />
+                    </button>
+                  </div>
+                  <TransformComponent
+                    wrapperClass="!w-full !h-full"
+                    contentClass="!w-full !h-full flex items-center justify-center"
+                  >
+                    <img
+                      src={lightbox.url}
+                      alt={lightbox.label}
+                      className="max-w-full max-h-full object-contain select-none"
+                      draggable={false}
+                    />
+                  </TransformComponent>
+                </>
+              )}
+            </TransformWrapper>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 };

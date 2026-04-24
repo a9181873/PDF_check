@@ -269,6 +269,134 @@ def export_review_log_json(
     return str(output)
 
 
+def _diff_type_label(dt: DiffType) -> str:
+    labels = {
+        DiffType.NUMBER_MODIFIED: "數值修改",
+        DiffType.TEXT_MODIFIED: "文字修改",
+        DiffType.ADDED: "新增內容",
+        DiffType.DELETED: "刪除內容",
+    }
+    return labels.get(dt, str(dt.value))
+
+
+def _truncate(text: str | None, length: int = 20) -> str:
+    if not text:
+        return "-"
+    text = text.replace("\n", " ").replace("\r", "")
+    if len(text) > length:
+        return text[:length - 1] + "…"
+    return text
+
+
+def export_review_log_txt(
+    comparison_id: str,
+    diff_report: DiffReport,
+    checklist: list[ChecklistItem] | None,
+    review_counts: dict[str, int] | None,
+    review_logs: list[dict[str, str | None]] | None,
+    output_path: str,
+) -> str:
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    checklist = checklist or []
+    review_counts = review_counts or {}
+    review_logs = review_logs or []
+    total = len(diff_report.items)
+    confirmed = review_counts.get("confirmed", 0)
+    flagged = review_counts.get("flagged", 0)
+    reviewed = confirmed + flagged
+    exported_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    created_at = diff_report.created_at.replace("T", " ").split(".")[0] if diff_report.created_at else "-"
+
+    lines: list[str] = []
+    sep = "═" * 56
+    lines.append(sep)
+    lines.append("  PDF 差異比對 — 審核檢視紀錄")
+    lines.append(sep)
+    lines.append("")
+
+    # Basic info
+    lines.append("■ 基本資訊")
+    lines.append(f"  比對 ID:    {comparison_id}")
+    lines.append(f"  舊版檔案:   {diff_report.old_filename}")
+    lines.append(f"  新版檔案:   {diff_report.new_filename}")
+    lines.append(f"  建立時間:   {created_at}")
+    lines.append(f"  匯出時間:   {exported_at}")
+    lines.append("")
+
+    # Summary
+    lines.append("■ 差異摘要")
+    lines.append(f"  總差異數:   {total}")
+    lines.append(f"  已確認:     {confirmed}")
+    lines.append(f"  已標記:     {flagged}")
+    lines.append(f"  待審核:     {max(total - reviewed, 0)}")
+    added = sum(1 for item in diff_report.items if item.diff_type == DiffType.ADDED)
+    deleted = sum(1 for item in diff_report.items if item.diff_type == DiffType.DELETED)
+    modified = sum(
+        1 for item in diff_report.items
+        if item.diff_type in {DiffType.TEXT_MODIFIED, DiffType.NUMBER_MODIFIED}
+    )
+    lines.append(f"  新增:       {added}")
+    lines.append(f"  刪除:       {deleted}")
+    lines.append(f"  修改:       {modified}")
+    lines.append("")
+
+    # Diff detail table
+    lines.append("■ 差異明細")
+    # Column widths: #=5, type=10, old=20, new=20, status=10, reviewer=10
+    header = f"  {'#':<5}{'類型':<10}{'原始內容':<22}{'修訂內容':<22}{'審核狀態':<10}{'審核人員':<10}"
+    lines.append("  " + "-" * 79)
+    lines.append(header)
+    lines.append("  " + "-" * 79)
+    for idx, item in enumerate(diff_report.items, start=1):
+        dtype = _diff_type_label(item.diff_type)
+        old_val = _truncate(item.old_value, 20)
+        new_val = _truncate(item.new_value, 20)
+        status = "已審核" if item.reviewed else "待審核"
+        reviewer = _truncate(item.reviewed_by, 10) if item.reviewed_by else "-"
+        lines.append(f"  {idx:<5}{dtype:<10}{old_val:<22}{new_val:<22}{status:<10}{reviewer:<10}")
+    lines.append("  " + "-" * 79)
+    lines.append("")
+
+    # Review operation logs
+    if review_logs:
+        lines.append("■ 審核操作紀錄")
+        diff_by_id = {item.id: item for item in diff_report.items}
+        for idx, log in enumerate(review_logs, start=1):
+            log_time = (log.get("created_at") or "-").replace("T", " ").split(".")[0]
+            reviewer_name = log.get("reviewer") or "匿名"
+            action = "確認" if log.get("action") == "confirmed" else "標記問題" if log.get("action") == "flagged" else str(log.get("action", "-"))
+            diff_id = log.get("diff_item_id", "-")
+            diff_item = diff_by_id.get(diff_id or "")
+            context = f" ({diff_item.context})" if diff_item and diff_item.context else ""
+            note_text = f" (備註: {log.get('note')})" if log.get("note") else ""
+            lines.append(f"  {idx}. [{log_time}] {reviewer_name} → {action} {diff_id}{context}{note_text}")
+        lines.append("")
+
+    # Checklist summary if present
+    if checklist:
+        lines.append("■ 核對清單摘要")
+        cl_confirmed = sum(1 for item in checklist if item.status == CheckStatus.CONFIRMED)
+        cl_anomaly = sum(1 for item in checklist if item.status == CheckStatus.ANOMALY)
+        cl_missing = sum(1 for item in checklist if item.status == CheckStatus.MISSING)
+        cl_pending = sum(1 for item in checklist if item.status == CheckStatus.PENDING)
+        lines.append(f"  總項目數:   {len(checklist)}")
+        lines.append(f"  已確認:     {cl_confirmed}")
+        lines.append(f"  異常:       {cl_anomaly}")
+        lines.append(f"  缺漏:       {cl_missing}")
+        lines.append(f"  待核:       {cl_pending}")
+        lines.append("")
+
+    lines.append(sep)
+    lines.append("  本報告由 PDF 差異比對系統自動產生")
+    lines.append(sep)
+    lines.append("")
+
+    output.write_text("\n".join(lines), encoding="utf-8")
+    return str(output)
+
+
 def export_review_log_csv(
     comparison_id: str,
     diff_report: DiffReport,

@@ -1,7 +1,7 @@
 import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { isAxiosError } from 'axios';
 import { useNavigate, useParams } from 'react-router-dom';
-import { AlertCircle, BarChart3, ChevronDown, Download, Eye, EyeOff, Upload, ZoomIn, ZoomOut } from 'lucide-react';
+import { AlertCircle, BarChart3, ChevronDown, Download, Eye, EyeOff, LogOut, Settings, Upload, ZoomIn, ZoomOut } from 'lucide-react';
 
 import ChecklistPanel from '../components/ChecklistPanel';
 import DiffListPanel from '../components/DiffListPanel';
@@ -11,6 +11,7 @@ import { checklistApi, buildApiUrl, buildWebSocketUrl, compareApi, reviewApi } f
 import { ChecklistItem, DiffReport } from '../services/types';
 import { useCompareStore } from '../stores/compareStore';
 import { useCrossWindowSync } from '../hooks/useCrossWindowSync';
+import { useAuthStore } from '../stores/authStore';
 
 const ChecklistUpload = lazy(() => import('../components/ChecklistUpload'));
 const DiffPopup = lazy(() => import('../components/DiffPopup'));
@@ -95,8 +96,10 @@ const ComparePage: React.FC = () => {
   const [leftTab, setLeftTab] = useState<'diff_list' | 'checklist'>('diff_list');
   const [activeTab, setActiveTab] = useState<'diffs' | 'checklist'>('diffs');
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [showDiffLabels, setShowDiffLabels] = useState(true);
 
   const { broadcastPageChange, broadcastDiffSelect } = useCrossWindowSync(taskId || null);
+  const { user: authUser, logout } = useAuthStore();
 
   const handlePageChange = (side: 'old' | 'new', page: number) => {
     setCurrentPage(side, page);
@@ -352,14 +355,18 @@ const ComparePage: React.FC = () => {
     return buildApiUrl(`/api/compare/${taskId}/pdf/${version}`);
   };
 
-  const isProcessing = status?.status === 'pending' || status?.status === 'parsing' || status?.status === 'diffing';
+  // Any non-terminal status (including snapshotting) is still in-progress
+  const isProcessing = status !== null && status.status !== 'done' && status.status !== 'error';
+  const isFetchingResult = status?.status === 'done' && !report;
 
-  if (isLoading || isProcessing) {
+  if (isLoading || isProcessing || isFetchingResult) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[linear-gradient(180deg,_#f5f5f5_0%,_#eef4ef_100%)]">
         <div className="text-center">
           <div className="w-16 h-16 mx-auto mb-6 border-4 border-primary-600 border-t-transparent rounded-full animate-spin" />
-          <h2 className="text-xl font-medium text-gray-900 mb-2">載入比較結果中</h2>
+          <h2 className="text-xl font-medium text-gray-900 mb-2">
+            {isFetchingResult ? '準備比較報告中' : '載入比較結果中'}
+          </h2>
           <p className="text-gray-600">
             {status?.current_step ? `正在 ${status.current_step}...` : '請稍候...'}
           </p>
@@ -401,17 +408,7 @@ const ComparePage: React.FC = () => {
   if (!report) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[linear-gradient(180deg,_#f5f5f5_0%,_#eef4ef_100%)]">
-        <div className="text-center p-8 bg-white rounded-3xl border border-white shadow-large">
-          <h2 className="text-xl font-medium text-gray-900 mb-2">無比較結果</h2>
-          <p className="text-gray-600 mb-6">找不到指定的比較任務或任務尚未完成</p>
-          <button
-            type="button"
-            onClick={() => navigate('/')}
-            className="px-6 py-3 bg-primary-600 text-white rounded-xl hover:bg-primary-700 transition-colors"
-          >
-            返回上傳頁面
-          </button>
-        </div>
+        <div className="w-16 h-16 border-4 border-primary-600 border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
@@ -457,13 +454,26 @@ const ComparePage: React.FC = () => {
               type="button"
               onClick={() => setGrayscaleEnabled(!grayscaleEnabled)}
               className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border transition-colors text-sm font-medium ${
-                grayscaleEnabled 
-                  ? 'border-primary-200 bg-primary-50 text-primary-700' 
+                grayscaleEnabled
+                  ? 'border-primary-200 bg-primary-50 text-primary-700'
                   : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
               }`}
               title="切換灰階模式"
             >
               灰階
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowDiffLabels(!showDiffLabels)}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border transition-colors text-sm font-medium ${
+                showDiffLabels
+                  ? 'border-primary-200 bg-primary-50 text-primary-700'
+                  : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+              }`}
+              title="顯示/隱藏差異標籤"
+            >
+              差異訊息
             </button>
 
             <button
@@ -474,6 +484,17 @@ const ComparePage: React.FC = () => {
               <Upload size={16} />
               <span>新比較</span>
             </button>
+
+            {authUser?.role === 'admin' && (
+              <button
+                type="button"
+                onClick={() => navigate('/admin')}
+                className="flex items-center gap-2 px-3 py-2.5 bg-white text-gray-700 rounded-xl border border-gray-200 hover:bg-gray-100 transition-colors"
+                title="帳號管理"
+              >
+                <Settings size={16} />
+              </button>
+            )}
             <div className="relative" ref={exportMenuRef}>
               <button
                 type="button"
@@ -527,9 +548,32 @@ const ComparePage: React.FC = () => {
                     <span>完整 Log</span>
                     <span className="text-xs text-gray-400">JSON</span>
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => handleExportDownload('log-txt')}
+                    className="flex w-full items-center justify-between px-4 py-3 text-left text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    <span>審核紀錄</span>
+                    <span className="text-xs text-gray-400">TXT</span>
+                  </button>
                 </div>
               ) : null}
             </div>
+
+            {/* User info */}
+            {authUser && (
+              <div className="flex items-center gap-2 pl-2 border-l border-gray-200">
+                <span className="text-sm text-gray-600">{authUser.display_name}</span>
+                <button
+                  type="button"
+                  onClick={() => { logout(); navigate('/login'); }}
+                  className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                  title="登出"
+                >
+                  <LogOut size={16} />
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </header>
@@ -708,6 +752,7 @@ const ComparePage: React.FC = () => {
                         diffItems={filteredItems}
                         selectedDiffId={selectedDiffId}
                         onDiffClick={handleDiffClick}
+                        showDiffLabels={showDiffLabels}
                       />
                     }
                     rightContent={
@@ -722,6 +767,7 @@ const ComparePage: React.FC = () => {
                         diffItems={filteredItems}
                         selectedDiffId={selectedDiffId}
                         onDiffClick={handleDiffClick}
+                        showDiffLabels={showDiffLabels}
                       />
                     }
                     syncEnabled={scrollSyncEnabled}
@@ -765,15 +811,16 @@ const ComparePage: React.FC = () => {
           onClose={closeDiffPopup}
           onConfirm={handleConfirmDiff}
           onFlag={handleFlagDiff}
+          taskId={taskId}
         />
       </Suspense>
 
       <footer className="bg-white/90 border-t border-[#dfe7e2] px-6 py-3 backdrop-blur">
         <div className="flex items-center justify-between text-sm text-gray-600">
           <div className="flex items-center space-x-4">
-            <span>{report.old_filename} ↔ {report.new_filename}</span>
+            <span>{report?.old_filename} ↔ {report?.new_filename}</span>
             <span>•</span>
-            <span>建立時間: {new Date(report.created_at).toLocaleString()}</span>
+            <span>建立時間: {report ? new Date(report.created_at).toLocaleString() : ''}</span>
           </div>
           <div className="flex items-center space-x-4">
             <span>同步滾動: {scrollSyncEnabled ? '啟用' : '停用'}</span>

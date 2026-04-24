@@ -138,6 +138,18 @@ def _get_bbox_for_token_group(group: list[TextToken]) -> tuple[str, BBox | None]
         return sub_text, full_bbox
         
     length = max(len(full_text), 1)
+    
+    # NEW: Try character-level precise bounding boxes if available
+    if p.char_bboxes and len(p.char_bboxes) == length:
+        relevant_chars = p.char_bboxes[start_idx:end_idx]
+        if relevant_chars:
+            x0 = min(c.x0 for c in relevant_chars)
+            y0 = min(c.y0 for c in relevant_chars)
+            x1 = max(c.x1 for c in relevant_chars)
+            y1 = max(c.y1 for c in relevant_chars)
+            return sub_text, BBox(page=full_bbox.page, x0=x0, y0=y0, x1=x1, y1=y1)
+
+    # Fallback to linear interpolation for non-char-mapped paragraphs
     frac_start = start_idx / length
     frac_end = end_idx / length
     width = full_bbox.x1 - full_bbox.x0
@@ -357,8 +369,8 @@ def diff_tables(old_tables: list[ParsedTable], new_tables: list[ParsedTable]) ->
 def diff_pixels(
     old_pdf_path: str,
     new_pdf_path: str,
-    threshold: int = 15,
-    min_area: int = 300,
+    threshold: int = 30,
+    min_area: int = 800,
     dpi: int = 150,
 ) -> list[DiffItem]:
     """Pixel-level diff using PyMuPDF rendering + numpy + scipy connected components.
@@ -435,8 +447,8 @@ def diff_pixels(
             if not mask.any():
                 continue
 
-            # Morphological dilation merges pixels within ~8px proximity
-            dilated = ndimage.binary_dilation(mask, structure=struct, iterations=8)
+            # Morphological dilation merges pixels within ~4px proximity
+            dilated = ndimage.binary_dilation(mask, structure=struct, iterations=4)
             labeled, n_regions = ndimage.label(dilated)
 
             for rid in range(1, n_regions + 1):
@@ -444,22 +456,90 @@ def diff_pixels(
                 actual_px = int((mask & region).sum())
                 if actual_px < min_area:
                     continue
+                # Suppress noise: require at least 5% of the region to differ
+                region_total = int(region.sum())
+                if region_total > 0 and actual_px / region_total < 0.05:
+                    continue
 
                 rows, cols = np.where(region)
-                # Convert pixel coords → PDF points (bottom-left origin)
-                x0 = float(cols.min()) * scale_to_pt
-                x1 = float(cols.max()) * scale_to_pt
-                # PDF Y is bottom-up: top of rendered box → bottom in PDF coords
-                y0 = ph_pt - float(rows.max()) * scale_to_pt
-                y1 = ph_pt - float(rows.min()) * scale_to_pt
-                bbox = BBox(page=page_no, x0=x0, y0=y0, x1=x1, y1=y1)
+                r0, r1 = int(rows.min()), int(rows.max()) + 1
+                c0, c1 = int(cols.min()), int(cols.max()) + 1
+
+                # Structural-similarity filter: when the bounding box is nearly
+                # identical on both sides (e.g. the same raster image re-encoded
+                # with slightly different JPEG settings or DPI), the region is
+                # rendering noise rather than a content change. NCC is scale and
+                # brightness invariant, so it stays close to 1.0 under pure
+                # compression/gamma drift but drops sharply for real edits.
+                patch_old = arr_old[r0:r1, c0:c1].astype(np.float64)
+                patch_new = arr_new[r0:r1, c0:c1].astype(np.float64)
+                if patch_old.size >= 100:
+                    a_std = float(patch_old.std())
+                    b_std = float(patch_new.std())
+                    if a_std > 1.0 and b_std > 1.0:
+                        ncc = float(
+                            ((patch_old - patch_old.mean()) * (patch_new - patch_new.mean())).mean()
+                            / (a_std * b_std)
+                        )
+                        if ncc > 0.96:
+                            continue
+
+                # PDF points in fitz's top-left origin (Y grows down)
+                fx0 = float(c0) * scale_to_pt
+                fx1 = float(c1 - 1) * scale_to_pt
+                fy0 = float(r0) * scale_to_pt
+                fy1 = float(r1 - 1) * scale_to_pt
+                # BBox model stores bottom-left origin
+                bbox = BBox(
+                    page=page_no,
+                    x0=fx0,
+                    y0=ph_pt - fy1,
+                    x1=fx1,
+                    y1=ph_pt - fy0,
+                )
+
+                # Recover any text the PDF's text layer has inside this region so
+                # the popup can show readable text alongside the image crop.
+                # Shrink 4pt on each side so edge characters whose bbox clips the
+                # dilated mask don't leak into get_textbox — a 2pt shrink was
+                # too generous and picked up neighbour chars asymmetrically on
+                # old vs new, defeating the identity check below.
+                old_text: str | None = None
+                new_text: str | None = None
+                ot, nt = "", ""
+                shrink = 4.0
+                rx0, ry0, rx1, ry1 = fx0 + shrink, fy0 + shrink, fx1 - shrink, fy1 - shrink
+                if rx1 > rx0 and ry1 > ry0:
+                    rect = fitz.Rect(rx0, ry0, rx1, ry1)
+                    try:
+                        ot = (page_old.get_textbox(rect) or "").strip()
+                        nt = (page_new.get_textbox(rect) or "").strip()
+                    except Exception:
+                        ot, nt = "", ""
+
+                # If both sides carry substantially the same text in this region,
+                # the pixel diff is rendering noise (font hinting, kerning micro-
+                # shifts, antialiasing) — suppress it. Use fuzzy match rather
+                # than exact equality because get_textbox is sensitive to sub-pt
+                # positional drift at the rect boundary: a 1-char asymmetric
+                # capture is common and should not defeat the identity check.
+                if ot and nt:
+                    on = _deep_normalize(ot)
+                    nn = _deep_normalize(nt)
+                    if on and nn and SequenceMatcher(None, on, nn).ratio() >= 0.80:
+                        continue
+
+                if ot != nt:
+                    MAX_LEN = 200
+                    old_text = (ot[:MAX_LEN] + "…") if len(ot) > MAX_LEN else (ot or None)
+                    new_text = (nt[:MAX_LEN] + "…") if len(nt) > MAX_LEN else (nt or None)
 
                 items.append(
                     DiffItem(
                         id="",
                         diff_type=DiffType.IMAGE_DIFF,
-                        old_value=None,
-                        new_value=None,
+                        old_value=old_text,
+                        new_value=new_text,
                         old_bbox=bbox,
                         new_bbox=bbox,
                         context=f"Page {page_no} 視覺差異 ({actual_px:,} px)",
@@ -520,12 +600,15 @@ def generate_diff_report(
     else:
         text_diffs = diff_paragraphs(old_doc.paragraphs, new_doc.paragraphs)
         table_diffs = diff_tables(old_doc.tables, new_doc.tables)
-        # Fallback pixel diff when text/table extraction yields nothing
+        # Always run pixel diff as supplementary for text PDFs, then
+        # cross-verify: any pixel region where both sides' text is identical
+        # is suppressed inside diff_pixels via the text identity check.
         pixel_diffs_fb = None
-        if not text_diffs and not table_diffs and old_pdf_path and new_pdf_path:
+        if old_pdf_path and new_pdf_path:
             pixel_diffs_fb = diff_pixels(old_pdf_path, new_pdf_path)
         merged_items = merge_diff_results(text_diffs, table_diffs, pixel_diffs_fb)
-        summary = f"text_pdf; text={len(text_diffs)}, table={len(table_diffs)}"
+        pxc = len(pixel_diffs_fb) if pixel_diffs_fb else 0
+        summary = f"text_pdf; text={len(text_diffs)}, table={len(table_diffs)}, pixel={pxc}"
 
     return DiffReport(
         project_id=project_id,
