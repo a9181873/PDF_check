@@ -56,6 +56,19 @@ docker compose logs -f backend
 | 重啟 | `docker compose restart backend` |
 | 看容器狀態 | `docker compose ps` |
 
+### 重新比對功能 (Recompare API)
+當系統的比對引擎更新後，您可以對已經上傳過的任務進行「重新比對」，而無需重新上傳 PDF。這對大檔案特別方便：
+```bash
+# 觸發重新比對
+curl -X POST http://localhost:8000/api/compare/recompare/{task_id}
+```
+*提示：前端介面若未來加入「重新比對」按鈕，也會呼叫此 API。*
+
+### 表格與大面積版面變更處理
+最新版的比對引擎（Phase 4）會自動偵測差異區塊大小。
+- **純文字/小區塊**：透過 OCR 與原生文字層進行比對，過濾字型抗鋸齒雜訊。
+- **大面積/表格（>8000px²）**：直接判定為「表格/版面變更」，會產生高解析度 (2x) 的截圖供雙邊對照，不再強制進行 OCR（避免表格結構產生亂碼）。
+
 ---
 
 ## 資料保存

@@ -223,6 +223,35 @@ async def upload_compare_files(
     return UploadResponse(task_id=task_id, status="parsing")
 
 
+@router.post("/recompare/{task_id}", response_model=UploadResponse)
+async def recompare(task_id: str, background_tasks: BackgroundTasks):
+    """Re-run the diff engine on an existing comparison without re-uploading files."""
+    comp = get_comparison(task_id)
+    if not comp:
+        raise HTTPException(status_code=404, detail="Comparison not found")
+
+    old_path = comp.get("old_file_path", "")
+    new_path = comp.get("new_file_path", "")
+    if not old_path or not new_path:
+        raise HTTPException(status_code=400, detail="Original PDF files not found")
+
+    # Reset task state
+    TASK_STORE.create(task_id)
+    update_comparison_status(task_id, "parsing")
+
+    background_tasks.add_task(
+        _run_compare_task,
+        task_id,
+        comp.get("project_id", ""),
+        old_path,
+        new_path,
+        comp.get("old_filename", "old.pdf"),
+        comp.get("new_filename", "new.pdf"),
+    )
+
+    return UploadResponse(task_id=task_id, status="parsing")
+
+
 @router.get("/{task_id}/status", response_model=CompareStatusResponse)
 async def get_compare_status(task_id: str):
     state = TASK_STORE.get(task_id)

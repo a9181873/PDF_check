@@ -572,30 +572,43 @@ def diff_pixels(
 
                 # ── Tier 2: local OCR fallback (outline-text PDFs) ────────
                 # Triggered when NEITHER side has a native text layer in the
-                # diff region (old_words / new_words both empty OR both patches
-                # returned empty strings from the intersection check).
-                if not ot and not nt:
+                # diff region.
+                #
+                # IMPORTANT: Large regions (tables, complex layouts) should NOT
+                # be OCR'd — Tesseract produces garbage on structured tables.
+                # Instead, report them as visual diffs with screenshots only.
+                patch_area = (r1 - r0) * (c1 - c0)
+                is_large_region = patch_area > 8000  # ~roughly 80×100 px or larger
+
+                if not ot and not nt and not is_large_region:
                     try:
                         import subprocess, tempfile, os as _os
-                        from PIL import Image as _PILImage
+                        from PIL import Image as _PILImage, ImageFilter as _PILFilter
 
-                        # Render only the diff patch at 2× DPI for OCR clarity
+                        # Render only the diff patch at 3× DPI for OCR clarity
                         clip_rect = fitz.Rect(fx0, fy0, fx1, fy1)
-                        ocr_mat = fitz.Matrix(2.0, 2.0)
+                        ocr_mat = fitz.Matrix(3.0, 3.0)
 
                         pix_o = page_old.get_pixmap(matrix=ocr_mat, clip=clip_rect, colorspace=fitz.csGRAY)
                         pix_n = page_new.get_pixmap(matrix=ocr_mat, clip=clip_rect, colorspace=fitz.csGRAY)
 
                         def _ocr_patch(pix) -> str:
-                            """Run Tesseract on a fitz Pixmap, return recognized text."""
+                            """Run Tesseract on a fitz Pixmap with binarization preprocessing."""
                             pil_img = _PILImage.frombytes("L", (pix.width, pix.height), pix.samples)
-                            # Scale up to at least 100px tall for Tesseract accuracy
-                            if pil_img.height < 100:
-                                scale = max(1, 100 // pil_img.height + 1)
+                            # Scale up to at least 120px tall for Tesseract accuracy
+                            if pil_img.height < 120:
+                                scale = max(1, 120 // pil_img.height + 1)
                                 pil_img = pil_img.resize(
                                     (pil_img.width * scale, pil_img.height * scale),
                                     _PILImage.LANCZOS,
                                 )
+                            # Otsu-style binarization: convert to pure black/white
+                            pil_arr = np.array(pil_img)
+                            thresh = int(pil_arr.mean()) - 20
+                            thresh = max(80, min(thresh, 200))
+                            pil_img = _PILImage.fromarray(
+                                ((pil_arr > thresh) * 255).astype(np.uint8)
+                            )
                             with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
                                 pil_img.save(f.name)
                                 tmp_path = f.name
@@ -622,20 +635,29 @@ def diff_pixels(
                         ocr_old_norm = _deep_normalize(ocr_old_raw)
                         ocr_new_norm = _deep_normalize(ocr_new_raw)
 
-                        # Tesseract often inserts spurious spaces in Chinese text due to kerning
-                        # (e.g. `「 本` vs `「本`). Ignore all spaces for this suppression check.
-                        if ocr_old_norm and ocr_new_norm and ocr_old_norm.replace(" ", "") == ocr_new_norm.replace(" ", ""):
-                            # OCR confirms same content → pure rendering noise
+                        # Strict space-immune comparison
+                        old_stripped = ocr_old_norm.replace(" ", "") if ocr_old_norm else ""
+                        new_stripped = ocr_new_norm.replace(" ", "") if ocr_new_norm else ""
+
+                        if old_stripped and new_stripped and old_stripped == new_stripped:
                             continue
 
+                        # Fuzzy character-level comparison
+                        if old_stripped and new_stripped:
+                            shorter = min(len(old_stripped), len(new_stripped))
+                            longer = max(len(old_stripped), len(new_stripped))
+                            if shorter > 0 and longer > 0:
+                                matches = sum(
+                                    1 for a, b in zip(old_stripped, new_stripped) if a == b
+                                )
+                                similarity = matches / longer
+                                if similarity > 0.6:
+                                    continue
+
                         # Only use OCR results if BOTH sides produced text.
-                        # If only one side has text, OCR likely failed on the other side
-                        # (e.g. garbage English on Chinese glyphs). In that case, don't
-                        # trust OCR at all — fall through to IMAGE_DIFF.
                         if ocr_old_raw and ocr_new_raw:
                             ot = ocr_old_raw
                             nt = ocr_new_raw
-                        # Otherwise: OCR unreliable → fall through to IMAGE_DIFF.
 
                     except Exception:
                         pass  # OCR unavailable or timed out → fall through
@@ -652,21 +674,31 @@ def diff_pixels(
                     new_text = (nt[:MAX_LEN] + "…") if len(nt) > MAX_LEN else (nt or None)
                     diff_type = DiffType.TEXT_MODIFIED
                     context_label = f"Page {page_no} 內容變更"
+                elif is_large_region:
+                    # Large region with no text = table/layout structural change.
+                    # Report as IMAGE_DIFF WITH screenshots (don't suppress).
+                    diff_type = DiffType.IMAGE_DIFF
+                    context_label = f"Page {page_no} 表格/版面變更"
 
-                # User requirement: only report text/number content changes.
-                # Pure graphic diffs (lines, borders, shading, logos) are noise.
-                if diff_type == DiffType.IMAGE_DIFF:
+                # Only suppress SMALL graphic noise (lines, borders, anti-aliasing).
+                # Large visual diffs (tables, layout) are meaningful and should be shown.
+                if diff_type == DiffType.IMAGE_DIFF and not is_large_region:
                     continue
 
                 try:
-                    import base64
+                    import base64, logging as _logging
                     clip_rect = fitz.Rect(fx0, fy0, fx1, fy1) + (-4, -4, 4, 4)
-                    mat_ui = fitz.Matrix(1.5, 1.5)
+                    # Use 2x resolution for table/large regions, 1.5x for text
+                    ui_scale = 2.0 if is_large_region else 1.5
+                    mat_ui = fitz.Matrix(ui_scale, ui_scale)
                     p_o = page_old.get_pixmap(matrix=mat_ui, clip=clip_rect)
                     p_n = page_new.get_pixmap(matrix=mat_ui, clip=clip_rect)
                     b64_old = "data:image/png;base64," + base64.b64encode(p_o.tobytes("png")).decode("utf-8")
                     b64_new = "data:image/png;base64," + base64.b64encode(p_n.tobytes("png")).decode("utf-8")
-                except Exception:
+                    _logging.info(f"[CROP] Generated base64 images: old={len(b64_old)}B, new={len(b64_new)}B for region {r0},{c0}-{r1},{c1}")
+                except Exception as e:
+                    import logging as _logging
+                    _logging.error(f"[CROP] Failed to generate base64 for region {r0},{c0}-{r1},{c1}: {e}")
                     b64_old = None
                     b64_new = None
 

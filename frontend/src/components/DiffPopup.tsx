@@ -123,7 +123,7 @@ const DiffPopupInner: React.FC<DiffPopupInnerProps> = ({
   };
 
   return (
-    <div className={`relative w-full max-w-2xl max-h-[90vh] bg-white rounded-2xl shadow-2xl animate-fade-in flex flex-col ${className}`}>
+    <div className={`relative w-full max-w-2xl max-h-[90vh] bg-white rounded-2xl shadow-2xl animate-fade-in flex flex-col ${className}`} style={{ resize: 'both', overflow: 'hidden', minWidth: '400px', minHeight: '300px' }}>
       {/* Fixed header */}
       <div className="flex items-center justify-between p-4 sm:p-6 border-b border-gray-200 flex-shrink-0">
         <div className="flex items-center flex-wrap gap-2">
@@ -162,7 +162,7 @@ const DiffPopupInner: React.FC<DiffPopupInnerProps> = ({
               {diff.old_value && diff.new_value
                 ? getTrimmedDiffText(diff.old_value, diff.new_value)
                 : diff.new_value ?? diff.old_value ?? (isImageDiff
-                  ? '此範圍內偵測到視覺或排版變更（例如：圖片內容、表格外框、或文字位置移動），故無提取對應的純文字。'
+                  ? '偵測到表格或版面結構變更，請對照下方截圖確認差異。'
                   : diff.context)}
             </p>
           </div>
@@ -195,11 +195,6 @@ const DiffPopupInner: React.FC<DiffPopupInnerProps> = ({
               ) : null}
             </div>
             <div className={`p-3 sm:p-4 rounded-lg border space-y-3 ${diff.old_value || showOldImage ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-200'}`}>
-              {diff.old_value ? (
-                <pre className="text-sm text-gray-800 whitespace-pre-wrap break-words font-sans">
-                  {diff.old_value}
-                </pre>
-              ) : null}
               {showOldImage && oldCropUrl ? (
                 <button
                   type="button"
@@ -217,6 +212,14 @@ const DiffPopupInner: React.FC<DiffPopupInnerProps> = ({
                     <Maximize2 size={14} />
                   </span>
                 </button>
+              ) : null}
+              {diff.old_value ? (
+                <>
+                  {showOldImage ? <p className="text-xs text-gray-400 mt-2">OCR 判讀（僅供參考）</p> : null}
+                  <pre className="text-sm text-gray-800 whitespace-pre-wrap break-words font-sans">
+                    {diff.old_value}
+                  </pre>
+                </>
               ) : null}
               {!diff.old_value && !showOldImage ? (
                 <p className="text-sm text-gray-500 italic">
@@ -241,11 +244,6 @@ const DiffPopupInner: React.FC<DiffPopupInnerProps> = ({
               ) : null}
             </div>
             <div className={`p-3 sm:p-4 rounded-lg border space-y-3 ${diff.new_value || showNewImage ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
-              {diff.new_value ? (
-                <pre className="text-sm text-gray-800 whitespace-pre-wrap break-words font-sans">
-                  {diff.new_value}
-                </pre>
-              ) : null}
               {showNewImage && newCropUrl ? (
                 <button
                   type="button"
@@ -263,6 +261,14 @@ const DiffPopupInner: React.FC<DiffPopupInnerProps> = ({
                     <Maximize2 size={14} />
                   </span>
                 </button>
+              ) : null}
+              {diff.new_value ? (
+                <>
+                  {showNewImage ? <p className="text-xs text-gray-400 mt-2">OCR 判讀（僅供參考）</p> : null}
+                  <pre className="text-sm text-gray-800 whitespace-pre-wrap break-words font-sans">
+                    {diff.new_value}
+                  </pre>
+                </>
               ) : null}
               {!diff.new_value && !showNewImage ? (
                 <p className="text-sm text-gray-500 italic">
