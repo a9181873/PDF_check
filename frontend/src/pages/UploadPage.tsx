@@ -1,9 +1,10 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { isAxiosError } from 'axios';
 import { useNavigate } from 'react-router-dom';
-import { Upload, File, Folder, AlertCircle, CheckCircle, XCircle, Clock, ChevronRight, Search, Download } from 'lucide-react';
+import { Upload, File, Folder, AlertCircle, CheckCircle, XCircle, Clock, ChevronRight, Search, Download, LogOut, Settings, User } from 'lucide-react';
 import { compareApi, projectApi, buildApiUrl } from '../services/api';
 import { ComparisonInfo } from '../services/types';
+import { useAuthStore } from '../stores/authStore';
 
 function getSuggestedProjectName(oldName: string, newName: string): string {
   const stripExt = (n: string) => n.replace(/\.pdf$/i, '');
@@ -20,6 +21,7 @@ function getSuggestedProjectName(oldName: string, newName: string): string {
 
 const UploadPage: React.FC = () => {
   const navigate = useNavigate();
+  const { user: authUser, logout } = useAuthStore();
   const [oldFile, setOldFile] = useState<File | null>(null);
   const [newFile, setNewFile] = useState<File | null>(null);
   const [projectId, setProjectId] = useState('');
@@ -249,6 +251,28 @@ const UploadPage: React.FC = () => {
           <p className="text-gray-600 max-w-2xl mx-auto leading-7">
             上傳新舊版保險 DM 檔案，系統將自動比對文字與數字差異，並在灰階化的 PDF 上以彩色標記呈現。
           </p>
+          {/* User controls */}
+          {authUser && (
+            <div className="mt-4 inline-flex items-center gap-3">
+              <span className="text-sm text-gray-600 bg-white/80 rounded-full px-3 py-1.5 border border-gray-200">
+                <User size={14} className="inline -mt-0.5 mr-1" />{authUser.display_name}
+              </span>
+              {authUser.role === 'admin' && (
+                <button
+                  onClick={() => navigate('/admin')}
+                  className="text-sm text-gray-600 bg-white/80 rounded-full px-3 py-1.5 border border-gray-200 hover:bg-gray-50 transition-colors"
+                >
+                  <Settings size={14} className="inline -mt-0.5 mr-1" />帳號管理
+                </button>
+              )}
+              <button
+                onClick={() => { logout(); navigate('/login'); }}
+                className="text-sm text-gray-500 bg-white/80 rounded-full px-3 py-1.5 border border-gray-200 hover:bg-red-50 hover:text-red-600 transition-colors"
+              >
+                <LogOut size={14} className="inline -mt-0.5 mr-1" />登出
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Upload form */}
@@ -270,6 +294,15 @@ const UploadPage: React.FC = () => {
               <p className="text-sm text-gray-500 mt-2">
                 選取兩個檔案後自動以共通檔名＋核對日期時間建議，可手動修改。
               </p>
+              {/* Reviewer info */}
+              {authUser && (
+                <div className="mt-3 flex items-center gap-2 text-sm">
+                  <User size={14} className="text-gray-400" />
+                  <span className="text-gray-500">審核人員：</span>
+                  <span className="font-medium text-gray-800 bg-primary-50 px-2 py-0.5 rounded">{authUser.display_name}</span>
+                  <span className="text-gray-400">(@{authUser.username})</span>
+                </div>
+              )}
             </div>
 
             {/* File upload areas */}

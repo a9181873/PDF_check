@@ -369,9 +369,9 @@ def diff_tables(old_tables: list[ParsedTable], new_tables: list[ParsedTable]) ->
 def diff_pixels(
     old_pdf_path: str,
     new_pdf_path: str,
-    threshold: int = 30,
-    min_area: int = 800,
-    dpi: int = 150,
+    threshold: int = 15,
+    min_area: int = 200,
+    dpi: int = 200,
 ) -> list[DiffItem]:
     """Pixel-level diff using PyMuPDF rendering + numpy + scipy connected components.
 
@@ -456,9 +456,9 @@ def diff_pixels(
                 actual_px = int((mask & region).sum())
                 if actual_px < min_area:
                     continue
-                # Suppress noise: require at least 5% of the region to differ
+                # Suppress noise: require at least 2% of the region to differ
                 region_total = int(region.sum())
-                if region_total > 0 and actual_px / region_total < 0.05:
+                if region_total > 0 and actual_px / region_total < 0.02:
                     continue
 
                 rows, cols = np.where(region)
@@ -481,7 +481,7 @@ def diff_pixels(
                             ((patch_old - patch_old.mean()) * (patch_new - patch_new.mean())).mean()
                             / (a_std * b_std)
                         )
-                        if ncc > 0.96:
+                        if ncc > 0.98:
                             continue
 
                 # PDF points in fitz's top-left origin (Y grows down)
@@ -526,7 +526,7 @@ def diff_pixels(
                 if ot and nt:
                     on = _deep_normalize(ot)
                     nn = _deep_normalize(nt)
-                    if on and nn and SequenceMatcher(None, on, nn).ratio() >= 0.80:
+                    if on and nn and SequenceMatcher(None, on, nn).ratio() >= 0.95:
                         continue
 
                 if ot != nt:
@@ -553,6 +553,141 @@ def diff_pixels(
     return items
 
 
+def diff_images(
+    old_pdf_path: str,
+    new_pdf_path: str,
+) -> list[DiffItem]:
+    """Compare embedded images across pages using perceptual hashing (pHash).
+
+    Detects image replacements, additions, and deletions that text/pixel diff
+    might miss or misattribute.
+    """
+    try:
+        import fitz
+        import imagehash
+        from PIL import Image
+    except ImportError:
+        return []
+
+    try:
+        doc_old = fitz.open(old_pdf_path)
+        doc_new = fitz.open(new_pdf_path)
+    except Exception:
+        return []
+
+    items: list[DiffItem] = []
+
+    def _extract_images(doc) -> list[list[dict]]:
+        """Return per-page list of {xref, bbox, phash}."""
+        pages: list[list[dict]] = []
+        for page in doc:
+            page_imgs: list[dict] = []
+            for img_info in page.get_images(full=True):
+                xref = img_info[0]
+                try:
+                    pix = fitz.Pixmap(doc, xref)
+                    if pix.n > 4:
+                        pix = fitz.Pixmap(fitz.csRGB, pix)
+                    pil_img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+                    phash = imagehash.phash(pil_img)
+                except Exception:
+                    continue
+                # Find image bbox on page
+                rects = page.get_image_rects(xref)
+                if not rects:
+                    continue
+                r = rects[0]
+                ph = page.rect.height
+                page_imgs.append({
+                    "xref": xref,
+                    "phash": phash,
+                    "rect": r,
+                    "bbox": BBox(page=page.number + 1, x0=r.x0, y0=ph - r.y1, x1=r.x1, y1=ph - r.y0),
+                    "width": r.width,
+                    "height": r.height,
+                })
+            pages.append(page_imgs)
+        return pages
+
+    def _iou(a, b) -> float:
+        x0 = max(a.x0, b.x0)
+        y0 = max(a.y0, b.y0)
+        x1 = min(a.x1, b.x1)
+        y1 = min(a.y1, b.y1)
+        inter = max(0, x1 - x0) * max(0, y1 - y0)
+        area_a = (a.x1 - a.x0) * (a.y1 - a.y0)
+        area_b = (b.x1 - b.x0) * (b.y1 - b.y0)
+        union = area_a + area_b - inter
+        return inter / union if union > 0 else 0.0
+
+    try:
+        old_pages = _extract_images(doc_old)
+        new_pages = _extract_images(doc_new)
+        shared = min(len(old_pages), len(new_pages))
+
+        for page_i in range(shared):
+            page_no = page_i + 1
+            old_imgs = old_pages[page_i]
+            new_imgs = new_pages[page_i]
+            matched_new: set[int] = set()
+
+            for oi in old_imgs:
+                best_j = -1
+                best_iou = 0.0
+                for j, ni in enumerate(new_imgs):
+                    if j in matched_new:
+                        continue
+                    iou_val = _iou(oi["bbox"], ni["bbox"])
+                    if iou_val > best_iou:
+                        best_iou = iou_val
+                        best_j = j
+
+                if best_j >= 0 and best_iou >= 0.8:
+                    matched_new.add(best_j)
+                    ni = new_imgs[best_j]
+                    hamming = oi["phash"] - ni["phash"]
+                    size_changed = abs(oi["width"] - ni["width"]) > 2 or abs(oi["height"] - ni["height"]) > 2
+                    if hamming > 0 or size_changed:
+                        desc_parts = []
+                        if hamming > 0:
+                            desc_parts.append(f"\u5716\u7247\u5167\u5bb9\u8b8a\u66f4 (hamming={hamming})")
+                        if size_changed:
+                            desc_parts.append(f"\u5c3a\u5bf8 {oi['width']:.0f}x{oi['height']:.0f} \u2192 {ni['width']:.0f}x{ni['height']:.0f}")
+                        items.append(DiffItem(
+                            id="", diff_type=DiffType.IMAGE_DIFF,
+                            old_value="\u5d4c\u5165\u5716\u7247\u8b8a\u66f4",
+                            new_value="; ".join(desc_parts),
+                            old_bbox=oi["bbox"], new_bbox=ni["bbox"],
+                            context=f"Page {page_no} \u5d4c\u5165\u5716\u7247\u8b8a\u66f4",
+                            confidence=0.90,
+                        ))
+                else:
+                    items.append(DiffItem(
+                        id="", diff_type=DiffType.DELETED,
+                        old_value=f"Page {page_no} \u5d4c\u5165\u5716\u7247\u522a\u9664",
+                        new_value=None,
+                        old_bbox=oi["bbox"], new_bbox=None,
+                        context=f"Page {page_no} \u5716\u7247\u522a\u9664",
+                        confidence=0.85,
+                    ))
+
+            for j, ni in enumerate(new_imgs):
+                if j not in matched_new:
+                    items.append(DiffItem(
+                        id="", diff_type=DiffType.ADDED,
+                        old_value=None,
+                        new_value=f"Page {page_no} \u5d4c\u5165\u5716\u7247\u65b0\u589e",
+                        old_bbox=None, new_bbox=ni["bbox"],
+                        context=f"Page {page_no} \u5716\u7247\u65b0\u589e",
+                        confidence=0.85,
+                    ))
+    finally:
+        doc_old.close()
+        doc_new.close()
+
+    return items
+
+
 def _sort_key(item: DiffItem) -> tuple[int, float]:
     bbox = item.new_bbox or item.old_bbox
     if not bbox:
@@ -564,10 +699,13 @@ def merge_diff_results(
     text_diffs: list[DiffItem],
     table_diffs: list[DiffItem],
     pixel_diffs: list[DiffItem] | None,
+    image_diffs: list[DiffItem] | None = None,
 ) -> list[DiffItem]:
     merged = [*text_diffs, *table_diffs]
     if pixel_diffs:
         merged.extend(pixel_diffs)
+    if image_diffs:
+        merged.extend(image_diffs)
 
     merged = sorted(merged, key=_sort_key)
     for index, item in enumerate(merged, start=1):
@@ -592,11 +730,20 @@ def generate_diff_report(
     # one-sided text layer produces a flood of spurious ADDED/DELETED items.
     use_pixel_only = (old_doc.is_image_pdf or new_doc.is_image_pdf) and old_pdf_path and new_pdf_path
 
+    # Embedded image comparison (always run when paths available)
+    img_diffs: list[DiffItem] | None = None
+    if old_pdf_path and new_pdf_path:
+        try:
+            img_diffs = diff_images(old_pdf_path, new_pdf_path)
+        except Exception:
+            img_diffs = None
+    imgc = len(img_diffs) if img_diffs else 0
+
     if use_pixel_only:
         pixel_diffs = diff_pixels(old_pdf_path, new_pdf_path)
-        merged_items = merge_diff_results([], [], pixel_diffs)
+        merged_items = merge_diff_results([], [], pixel_diffs, img_diffs)
         mode = "image_pdf" if (old_doc.is_image_pdf and new_doc.is_image_pdf) else "mixed_pdf"
-        summary = f"{mode}; pixel_diffs={len(pixel_diffs)}"
+        summary = f"{mode}; pixel={len(pixel_diffs)}, img={imgc}"
     else:
         text_diffs = diff_paragraphs(old_doc.paragraphs, new_doc.paragraphs)
         table_diffs = diff_tables(old_doc.tables, new_doc.tables)
@@ -606,9 +753,9 @@ def generate_diff_report(
         pixel_diffs_fb = None
         if old_pdf_path and new_pdf_path:
             pixel_diffs_fb = diff_pixels(old_pdf_path, new_pdf_path)
-        merged_items = merge_diff_results(text_diffs, table_diffs, pixel_diffs_fb)
+        merged_items = merge_diff_results(text_diffs, table_diffs, pixel_diffs_fb, img_diffs)
         pxc = len(pixel_diffs_fb) if pixel_diffs_fb else 0
-        summary = f"text_pdf; text={len(text_diffs)}, table={len(table_diffs)}, pixel={pxc}"
+        summary = f"text_pdf; text={len(text_diffs)}, table={len(table_diffs)}, pixel={pxc}, img={imgc}"
 
     return DiffReport(
         project_id=project_id,
