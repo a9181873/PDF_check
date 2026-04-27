@@ -322,6 +322,25 @@ def list_all_comparisons(limit: int = 10) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def delete_comparison(comparison_id: str) -> bool:
+    with get_connection() as conn:
+        cursor = conn.execute("DELETE FROM comparisons WHERE id = ?", (comparison_id,))
+    return cursor.rowcount > 0
+
+
+def list_all_comparisons_unlimited() -> list[dict]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, project_id, old_filename, new_filename, status,
+                   created_at, completed_at, error_message
+            FROM comparisons
+            ORDER BY created_at DESC
+            """
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def add_review_log(
     comparison_id: str,
     diff_item_id: str,

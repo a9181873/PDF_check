@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { isAxiosError } from 'axios';
 import { useNavigate } from 'react-router-dom';
-import { Upload, File, Folder, AlertCircle, CheckCircle, XCircle, Clock, ChevronRight, Search, Download, LogOut, Settings, User } from 'lucide-react';
+import { Upload, File, Folder, AlertCircle, CheckCircle, XCircle, Clock, ChevronRight, Search, Download, LogOut, Settings, User, Trash2 } from 'lucide-react';
 import { compareApi, projectApi, buildApiUrl } from '../services/api';
 import { ComparisonInfo } from '../services/types';
 import { useAuthStore } from '../stores/authStore';
@@ -35,6 +35,8 @@ const UploadPage: React.FC = () => {
   const [historySearch, setHistorySearch] = useState('');
   const [openExportId, setOpenExportId] = useState<string | null>(null);
   const exportDropdownRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const filteredHistory = useMemo(() => {
     if (!historySearch) return recentComparisons;
@@ -49,6 +51,23 @@ const UploadPage: React.FC = () => {
   const handleHistoryExport = (compId: string, format: string) => {
     window.open(buildApiUrl(`/api/export/${compId}/${format}`), '_blank', 'noopener,noreferrer');
     setOpenExportId(null);
+  };
+
+  const handleDeleteConfirm = async (compId: string) => {
+    setConfirmDeleteId(null);
+    setDeletingId(compId);
+    try {
+      await projectApi.deleteComparison(compId);
+      setRecentComparisons((prev) => prev.filter((c) => c.id !== compId));
+    } catch (err) {
+      console.error('Failed to delete comparison:', err);
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const handleExportAll = () => {
+    window.open(projectApi.exportAllComparisonsUrl(), '_blank', 'noopener,noreferrer');
   };
 
   useEffect(() => {
@@ -389,6 +408,15 @@ const UploadPage: React.FC = () => {
                 ({filteredHistory.length}{historySearch ? ` / ${recentComparisons.length}` : ''})
               </span>
             </div>
+            <button
+              type="button"
+              onClick={handleExportAll}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-200 rounded-lg bg-white text-gray-600 hover:text-primary-600 hover:border-primary-200 transition-colors"
+              title="匯出全部比對紀錄 CSV"
+            >
+              <Download size={15} />
+              匯出紀錄
+            </button>
           </div>
 
           {/* Search box */}
@@ -489,6 +517,38 @@ const UploadPage: React.FC = () => {
                         </div>
                       )}
                     </div>
+                  )}
+
+                  {/* Delete button */}
+                  {confirmDeleteId === comp.id ? (
+                    <div className="flex-shrink-0 flex items-center gap-1 mr-1">
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); handleDeleteConfirm(comp.id); }}
+                        className="px-2 py-1 text-xs bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
+                      >
+                        確認刪除
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(null); }}
+                        className="px-2 py-1 text-xs bg-gray-200 text-gray-600 rounded-lg hover:bg-gray-300 transition-colors"
+                      >
+                        取消
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(comp.id); }}
+                      disabled={deletingId === comp.id}
+                      className="flex-shrink-0 w-8 h-8 rounded-full bg-white flex items-center justify-center text-gray-300 hover:text-red-500 hover:bg-red-50 transition-all shadow-sm mr-1 opacity-0 group-hover:opacity-100"
+                      title="刪除此筆紀錄"
+                    >
+                      {deletingId === comp.id
+                        ? <div className="w-3.5 h-3.5 border-2 border-red-400 border-t-transparent rounded-full animate-spin" />
+                        : <Trash2 size={15} />}
+                    </button>
                   )}
 
                   {/* Navigate arrow */}

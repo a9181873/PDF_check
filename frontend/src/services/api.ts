@@ -110,6 +110,15 @@ export const projectApi = {
     const response = await api.get(`/api/projects/all/comparisons`, { params: { limit } });
     return response.data;
   },
+
+  async deleteComparison(comparisonId: string): Promise<{ ok: boolean }> {
+    const response = await api.delete(`/api/projects/all/comparisons/${comparisonId}`);
+    return response.data;
+  },
+
+  exportAllComparisonsUrl(): string {
+    return buildApiUrl('/api/projects/all/comparisons/export');
+  },
 };
 
 export const reviewApi = {

@@ -1,4 +1,8 @@
+import csv
+import io
+
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 
 from models.database import list_project_comparisons, list_projects, project_exists
 from models.database import create_project as create_project_row
@@ -19,10 +23,49 @@ async def list_projects_api():
     return [ProjectResponse(**row) for row in rows]
 
 
+@router.get("/all/comparisons/export")
+async def export_all_comparisons_csv():
+    from models.database import list_all_comparisons_unlimited
+    rows = list_all_comparisons_unlimited()
+
+    output = io.StringIO(newline="")
+    writer = csv.writer(output)
+    writer.writerow(["比對編號", "專案名稱", "舊版檔案", "新版檔案", "狀態", "建立時間", "完成時間", "錯誤訊息"])
+    status_map = {"done": "已完成", "error": "錯誤", "pending": "待處理", "parsing": "處理中"}
+    for row in rows:
+        writer.writerow([
+            row["id"],
+            row["project_id"] or "",
+            row["old_filename"] or "",
+            row["new_filename"] or "",
+            status_map.get(row["status"], row["status"]),
+            row["created_at"] or "",
+            row["completed_at"] or "",
+            row["error_message"] or "",
+        ])
+
+    content = "﻿" + output.getvalue()
+    return StreamingResponse(
+        iter([content.encode("utf-8")]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=comparison_records.csv"},
+    )
+
+
 @router.get("/all/comparisons")
 async def list_all_projects_comparisons_api(limit: int = 10):
     from models.database import list_all_comparisons
     return list_all_comparisons(limit)
+
+
+@router.delete("/all/comparisons/{comparison_id}")
+async def delete_comparison_api(comparison_id: str):
+    from models.database import delete_comparison
+    deleted = delete_comparison(comparison_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Comparison not found")
+    return {"ok": True}
+
 
 @router.get("/{project_id}/comparisons")
 async def list_project_comparisons_api(project_id: str):
