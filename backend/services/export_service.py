@@ -205,7 +205,7 @@ def export_review_report_pdf(
             fitz.Point(current_rect.x0, current_y),
             line,
             fontsize=11,
-            fontname="helv",
+            fontname="china-t",
         )
         current_y += line_height
 
@@ -483,7 +483,7 @@ def export_review_log_csv(
                 }
             )
 
-    with output.open("w", encoding="utf-8", newline="") as csvfile:
+    with output.open("w", encoding="utf-8-sig", newline="") as csvfile:
         writer = csv.DictWriter(
             csvfile,
             fieldnames=fieldnames,
